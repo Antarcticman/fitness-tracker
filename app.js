@@ -453,7 +453,11 @@ function renderBlock(b){
 function renderBottomNav(){
   bottomNav.innerHTML = "";
   Object.entries(CATALOG).forEach(([k,v])=>{
-    const btn = el("button","nav-btn"+(k===currentPart?" active":""), v.label);
+    // 這裡結構改了：按鈕裡面包一個 span
+    const btn = el("button","nav-btn"+(k===currentPart?" active":""));
+    const span = el("span", "", v.label);
+    btn.appendChild(span);
+
     btn.addEventListener("click",()=>{
       currentPart = k;
       
@@ -520,16 +524,40 @@ function collectTodayRows(){
   const nowISO = new Date().toISOString(); 
   return blocks.filter(b=>b.sets.length>0).map(b=>blockToRow(b, nowISO));
 }
-function fillExportTable(rows){
-  exportTbody.innerHTML = "";
-  rows.forEach(r=>{
-    const tr = document.createElement("tr");
-    ["日期","部位","動作","組1","組2","組3","組4","重1","重2","重3","重4"].forEach(k=>{
-      const td = document.createElement("td"); td.textContent = r[k]; tr.appendChild(td);
-    });
-    exportTbody.appendChild(tr);
+// ====== 優化後的 Export Logic ======
+
+// 1. 產生簡易預覽 HTML (取代原本的 Table)
+function renderExportPreview(rows){
+  const container = document.getElementById("exportTableBody"); // 沿用原本的 ID，但 CSS 改了用途
+  if(!container) return;
+  container.innerHTML = "";
+  container.className = "export-preview"; // 切換 class
+
+  rows.forEach(r => {
+    // 簡單顯示： 啞鈴臥推 x 4組
+    let setDesc = [];
+    for(let i=1; i<=4; i++) {
+        if(r[`組${i}`] > 0) setDesc.push(`${r[`組${i}`]}x${r[`重${i}`]}`);
+    }
+    const div = el("div", "ep-row");
+    div.innerHTML = `<span>${r["動作"]}</span> <span style="color:#888">${setDesc.length} 組</span>`;
+    container.appendChild(div);
   });
 }
+
+// 2. 修改按鈕事件
+finishDayBtn?.addEventListener("click", ()=>{
+  const rows = collectTodayRows();
+  if (!rows.length){ alert("尚未有任何組數紀錄。"); return; }
+  
+  // 更新標題與內容
+  document.getElementById("exportTitle").textContent = "本次運動總結";
+  // 插入一段提示文字 (如果有需要)
+  const previewBox = document.getElementById("exportTableBody");
+  renderExportPreview(rows);
+  
+  exportPanel.classList.remove("hidden");
+});
 
 function resetMainFromCsv(){
   blocks.length = 0;

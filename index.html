@@ -30,9 +30,12 @@
     <!-- 下：部位列 -->
     <nav class="bottom-nav" id="bottomNav" aria-label="選擇部位"></nav>
 
-    <!-- 右下：完成運動 + 清除全部 -->
-    <button id="finishDay" class="btn btn-primary finish-btn" aria-label="完成運動並匯出">完成運動</button>
-    <button id="clearAll"  class="btn btn-danger  clear-btn"  aria-label="清除全部紀錄">清除全部</button>
+    <div class="float-btn-wrap">
+      <!-- 右下：完成運動 + 清除全部 -->
+      <button id="finishDay" class="btn btn-primary finish-btn" aria-label="完成運動並匯出">完成運動</button>
+      <button id="clearAll"  class="btn btn-danger  clear-btn"  aria-label="清除全部紀錄">清除全部</button>
+    </div>
+    
   </div>
 
   <!-- 日曆頁 -->
@@ -100,28 +103,18 @@
   </section>
 
   <!-- 完成運動面板（直接寫入 Excel） -->
-  <div id="exportPanel" class="export-panel hidden" role="dialog" aria-modal="true" aria-labelledby="exportTitle">
+  <div id="exportPanel" class="export-panel hidden" role="dialog">
     <div class="export-card">
       <div class="export-head">
-        <h3 id="exportTitle">今日紀錄（將寫入既有 CSV）</h3>
-        <button id="closeExportBtn" class="btn btn-danger btn-sm">關閉</button>
+        <h3 id="exportTitle">本次運動總結</h3>
+        <p>確認無誤後將同步至雲端資料庫</p>
       </div>
-      <div class="export-body">
-        <div class="export-table-wrap">
-          <table class="export-table">
-            <thead>
-              <tr>
-                <th>日期</th><th>部位</th><th>動作</th>
-                <th>組1</th><th>組2</th><th>組3</th><th>組4</th>
-                <th>重1</th><th>重2</th><th>重3</th><th>重4</th>
-              </tr>
-            </thead>
-            <tbody id="exportTableBody"></tbody>
-          </table>
-        </div>
-      </div>
+      
+      <div id="exportTableBody"></div> 
+
       <div class="export-actions">
-        <button id="confirmAppendBtn" class="btn btn-primary">完成</button>
+        <button id="closeExportBtn" class="btn btn-danger">返回修改</button>
+        <button id="confirmAppendBtn" class="btn btn-primary">確認提交</button>
       </div>
     </div>
   </div>
