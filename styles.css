@@ -90,9 +90,18 @@ body {
 .text { font-size: 0.9rem; color: var(--text-muted); margin-top: 5px; }
 
 /* 轉盤區 */
-.picker { display: flex; gap: 10px; height: 150px; }
+.picker { display: flex; gap: 10px; height: 132px; }
 .col { flex: 1; background: rgba(0,0,0,0.2); border-radius: 12px; display: flex; flex-direction: column; align-items: center; padding: 10px 0; border: 1px solid var(--border-glass); }
-.wheel { flex: 1; width: 100%; overflow-y: scroll; scroll-snap-type: y mandatory; text-align: center; font-size: 1.4rem; font-weight: bold; }
+.wheel { 
+  flex: 1; 
+  width: 100%; 
+  overflow-y: scroll; 
+  scroll-snap-type: y mandatory; 
+  text-align: center; 
+  font-size: 1.4rem; 
+  font-weight: bold; 
+  height: 100%; /* 確保填滿父容器 */
+}
 /* 隱藏卷軸 */
 .wheel::-webkit-scrollbar { display: none; }
 .opt { height: 44px; line-height: 44px; scroll-snap-align: center; color: #555; transition: 0.2s; }
@@ -280,3 +289,20 @@ body {
 
 /* 4. 解決主頁卡片重疊或跑版問題：確保卡片間距 */
 .block { margin-bottom: 30px; }
+
+.del-btn {
+  background: transparent;
+  border: none;
+  color: #ff5252;
+  font-size: 1.2rem;
+  padding: 0 10px;
+  cursor: pointer;
+  opacity: 0.6;
+  transition: 0.2s;
+  display: flex;
+  align-items: center;
+}
+.del-btn:hover {
+  opacity: 1;
+  transform: scale(1.1);
+}

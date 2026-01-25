@@ -97,12 +97,14 @@ function kgToNearestLbStep(kg){
 function buildWheel(elem, values, initialValue, onChange){
   elem.innerHTML = "";
 
+  // 建立頂部 spacer
   for (let i=0;i<SPACER_COUNT;i++){
     const sp = document.createElement("div");
     sp.className = "opt spacer";
     sp.textContent = "-1";
     elem.appendChild(sp);
   }
+  // 建立選項
   values.forEach(v=>{
     const d = document.createElement("div");
     d.className = "opt";
@@ -110,6 +112,7 @@ function buildWheel(elem, values, initialValue, onChange){
     d.textContent = v;
     elem.appendChild(d);
   });
+  // 建立底部 spacer
   for (let i=0;i<SPACER_COUNT;i++){
     const sp = document.createElement("div");
     sp.className = "opt spacer";
@@ -118,33 +121,44 @@ function buildWheel(elem, values, initialValue, onChange){
   }
 
   const children = [...elem.children];
+  let isInitializing = true; // ★ 新增：初始化旗標
 
-  const highlightAndEmit = (realIdx)=>{
+  const highlightAndEmit = (realIdx, shouldEmit = true)=>{
     children.forEach(c=>c.classList.remove("active"));
     const childIdx = realIdx + SPACER_COUNT;
     const el = children[childIdx];
     if (el){
       el.classList.add("active");
-      onChange?.(Number(values[realIdx]));
+      // ★ 只有在非初始化狀態，且允許 emit 時才寫入資料
+      if(!isInitializing && shouldEmit){
+        onChange?.(Number(values[realIdx]));
+      }
     }
   };
+
   const scrollToRealIdx = (realIdx, smooth=true)=>{
     const childIdx = realIdx + SPACER_COUNT;
+    // ★ 修正計算公式：確保數學完美置中 (因為 CSS 改成了 132px)
     const targetTop = childIdx * ITEM_H + (ITEM_H/2 - elem.clientHeight/2);
     elem.scrollTo({ top: Math.max(0, targetTop), behavior: smooth ? "smooth" : "auto" });
-    highlightAndEmit(realIdx);
+    highlightAndEmit(realIdx, false); // 捲動當下不急著 emit，等 scroll 事件確認
   };
 
+  // 捲動監聽
   let timer = null;
   elem.addEventListener("scroll", ()=>{
+    if(isInitializing) return; // ★ 初始化時的捲動直接忽略，避免數值亂跳
+
     clearTimeout(timer);
     timer = setTimeout(()=>{
       const center = elem.scrollTop + elem.clientHeight/2;
       let childIdx = Math.round(center / ITEM_H - 0.5);
       let realIdx = childIdx - SPACER_COUNT;
       realIdx = Math.min(Math.max(realIdx, 0), values.length - 1);
-      scrollToRealIdx(realIdx);
-    }, 80);
+      
+      // 這裡才是真正更新數據的地方
+      highlightAndEmit(realIdx, true); 
+    }, 50); // 時間縮短一點，反應快一點
   });
 
   elem.addEventListener("click",(e)=>{
@@ -155,14 +169,20 @@ function buildWheel(elem, values, initialValue, onChange){
     let realIdx = childIdx - SPACER_COUNT;
     realIdx = Math.min(Math.max(realIdx, 0), values.length - 1);
     scrollToRealIdx(realIdx);
+    
+    // 點擊可以強制更新
+    setTimeout(()=> {
+        isInitializing = false; 
+        highlightAndEmit(realIdx, true); 
+    }, 300);
   });
 
+  // 初始化定位
   const initRealIdx = Math.max(0, values.indexOf(initialValue));
   setTimeout(()=> {
-    const childIdx = initRealIdx + SPACER_COUNT;
-    const initTop = childIdx * ITEM_H + (ITEM_H/2 - WHEEL_H/2);
-    elem.scrollTop = Math.max(0, initTop);
-    highlightAndEmit(initRealIdx);
+    scrollToRealIdx(initRealIdx, false); // 瞬間定位，不滑動
+    // ★ 延遲解開鎖定，確保初始化捲動結束後才開始監聽
+    setTimeout(()=>{ isInitializing = false; }, 200);
   }, 0);
 }
 
@@ -336,6 +356,7 @@ function renderBlock(b){
     container.innerHTML = "";
     const full = bRef.sets.length >= MAX_SETS;
 
+    // 1. 如果沒有任何組數 (Ghost State)
     if (bRef.sets.length===0){
       const ghost = el("li","set-item ghost"+(bRef.activeSetIdx===null?" active":"" ));
       ghost.append(el("div","badge","第 1 組"));
@@ -349,17 +370,42 @@ function renderBlock(b){
       return;
     }
 
+    // 2. 渲染已存在的組數
     hint.textContent = "";
     bRef.sets.slice(0, MAX_SETS).forEach((s, idx)=>{
       const li = el("li","set-item"+(idx===bRef.activeSetIdx?" active":""));
-      li.append(el("div","badge",`第 ${idx+1} 組`), el("div","sline", fmtSetLine(s)));
-      li.addEventListener("click", ()=>{
+      
+      // 左側內容區 (點擊切換編輯)
+      const infoDiv = el("div", "set-info");
+      infoDiv.style.flex = "1"; // 佔滿剩餘空間
+      infoDiv.append(el("div","badge",`第 ${idx+1} 組`), el("div","sline", fmtSetLine(s)));
+      infoDiv.addEventListener("click", ()=>{
         bRef.activeSetIdx = idx;
         rebuildWheels(); updateSummary(); renderSetList(container, bRef); refreshButtons();
       });
+
+      // ★ 右側刪除按鈕
+      const delBtn = el("button", "del-btn", "✕"); // 用乘號當叉叉
+      delBtn.title = "刪除此組";
+      delBtn.addEventListener("click", (e)=>{
+        e.stopPropagation(); // 阻止冒泡，避免觸發編輯
+        if(confirm(`確定刪除第 ${idx+1} 組嗎？`)){
+          bRef.sets.splice(idx, 1); // 刪除資料
+          bRef.activeSetIdx = null; // 重置編輯狀態，避免錯亂
+          // 如果刪光了，把 temp 重置為最後一筆或預設
+          if(bRef.sets.length > 0) {
+             const last = bRef.sets[bRef.sets.length-1];
+             bRef.temp = { ...last };
+          }
+          rebuildWheels(); updateSummary(); renderSetList(container, bRef); refreshButtons();
+        }
+      });
+
+      li.append(infoDiv, delBtn); // 注意這裡結構變了
       container.append(li);
     });
 
+    // 3. 預備下一組 (Ghost State)
     if (!full && !bRef.ended){
       const idx = bRef.sets.length;
       const ghost = el("li","set-item ghost"+(bRef.activeSetIdx===null?" active":"" ));
@@ -873,20 +919,31 @@ tabs.forEach(btn=>{
 
 // ====== Init ======
 (async function init(){
-  try { await reloadFromBackend(); } catch(e){ console.warn("尚未啟動後端或 Excel 檔尚未建立", e); }
+  try { 
+      // 1. 先讀取後端 (這裡面會呼叫 renderBottomNav)
+      await reloadFromBackend(); 
+  } catch(e){ 
+      console.warn("後端連線中...", e); 
+  }
+  
   renderCalendarWeekdays();
 
+  // ★ 修正邏輯：先清空，確保乾淨
+  blocks.length = 0; 
+  idCounter = 1;
+
+  // 2. 建立「唯一」的一張初始卡片
   createBlock(currentPart, 0);
-  // 第一塊帶入上次紀錄
+  
+  // 3. 帶入預設值
   const b = getActiveBlock();
   const partZh = CATALOG[b.part]?.label || b.part;
   const name   = CATALOG[b.part]?.exercises[b.actionIdx] || "";
   const last   = getLastDefaultsFromCsv(partZh, name);
   b.temp = { reps:last.reps, weight:last.weight };
 
-  await reloadFromBackend();
-  renderRecordsPartChips();
-  renderRecordsActionChips();
+  // 4. 最後再一次性渲染
+  await renderRecordsFilters(importedRows); // 確保 filter 有東西
   renderRecordsTable();
   renderMain();
 })();
