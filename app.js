@@ -659,6 +659,222 @@ function renderRecordsTable(){
       floatBtn.onclick = () => { displayUnit = (displayUnit === "lb" ? "kg" : "lb"); renderRecordsTable(); };
   }
 }
+// ====== Calendar Logic (補回日曆功能) ======
+function renderCalendarWeekdays(){
+  const zh = ["日","一","二","三","四","五","六"];
+  calendarWeekdays.innerHTML = zh.map(w=>`<div class="weekday">${w}</div>`).join("");
+}
+
+function partDotClass(partZh){
+  const map = { "胸":"dot-chest","背":"dot-back","臀腿":"dot-legs","肩":"dot-shoulder","肱二頭":"dot-biceps","肱三頭":"dot-triceps","腰腹":"dot-core","前臂":"dot-cardio" };
+  return map[partZh] || "dot-core";
+}
+
+function renderCalendar(){
+  const rows = [...importedRows];
+
+  // 依日期聚合
+  const partsByDate = {};
+  rows.forEach(r=>{
+    const dStr = r._dateStr || (r["日期"]||"").split("T")[0].replace(/-/g, '/');
+    if (!dStr) return;
+    (partsByDate[dStr] = partsByDate[dStr] || new Set()).add(r["部位"]);
+  });
+
+  const y = calendarDate.getFullYear();
+  const m = calendarDate.getMonth();
+  const daysInMonth = new Date(y, m+1, 0).getDate();
+  const first = new Date(y, m, 1);
+  const startDow = first.getDay();
+
+  monthLabel.textContent = `${y}/${String(m+1).padStart(2,"0")}`;
+  calendarGrid.innerHTML = "";
+
+  const total = 42;
+  for (let i=0;i<total;i++){
+    const cell = el("div","day");
+    const dayNum = i - startDow + 1;
+    if (dayNum > 0 && dayNum <= daysInMonth){
+      const dateStr = ymd(new Date(y, m, dayNum));
+      cell.append(el("div","d", String(dayNum)));
+      
+      const badges = el("div","badges");
+      const parts = Array.from(partsByDate[dateStr] || []);
+      parts.forEach(p=>{
+        const dotCls = partDotClass(p);
+        const b = el("div","badge");
+        const dot = el("span",`dot ${dotCls}`);
+        b.append(dot); 
+        badges.append(b);
+      });
+      cell.append(badges);
+
+      cell.addEventListener("click", ()=>{
+        // 移除其他選中狀態
+        document.querySelectorAll(".day.selected").forEach(d=>d.classList.remove("selected"));
+        cell.classList.add("selected");
+        selectedCalDate = dateStr;
+        renderCalendarDetails();
+      });
+
+      if (selectedCalDate === dateStr) cell.classList.add("selected");
+    }
+    calendarGrid.append(cell);
+  }
+  
+  renderCalendarDetails();
+}
+
+function renderCalendarDetails(){
+  calSideList.innerHTML = "";
+  if (!selectedCalDate){
+    calSideTitle.textContent = "選擇日期查看詳情";
+    return;
+  }
+  calSideTitle.textContent = selectedCalDate;
+
+  const rows = (importedRows || []).filter(r => (r._dateStr || r["日期"]) === selectedCalDate);
+
+  if (rows.length === 0){
+    const li = el("li","side-item");
+    li.textContent = "這一天沒有紀錄";
+    calSideList.append(li);
+    return;
+  }
+
+  rows.forEach(r=>{
+    const li = el("li","side-item");
+    const top = el("div","si-top");
+    top.append(el("span","", `${r["部位"]} · ${r["動作"]}`));
+    li.append(top);
+
+    const detail = el("div","si-sub");
+    for (let i=1;i<=4;i++){
+      const reps = Number(r[`組${i}`]) || 0;
+      const wkg  = Number(r[`重${i}`]) || 0;
+      if (reps || wkg){
+        const lb = kgToNearestLbStep(wkg);
+        const line = el("div","si-line", `${reps} 下 @ ${lb} lb (${wkg} kg)`);
+        detail.append(line);
+      }
+    }
+    li.append(detail);
+    calSideList.append(li);
+  });
+}
+
+// 日曆翻頁監聽器
+prevMonthBtn?.addEventListener("click", ()=>{ calendarDate = new Date(calendarDate.getFullYear(), calendarDate.getMonth()-1, 1); renderCalendar(); });
+nextMonthBtn?.addEventListener("click", ()=>{ calendarDate = new Date(calendarDate.getFullYear(), calendarDate.getMonth()+1, 1); renderCalendar(); });
+
+
+// ====== Settings Editor Logic (補回設定頁功能) ======
+function renderEditor(){
+  if(!editorContainer) return;
+  editorContainer.innerHTML = "";
+  
+  Object.entries(CATALOG).forEach(([key, val]) => {
+    const box = el("div", "edit-group");
+    
+    // 標題與刪除部位按鈕
+    const head = el("div", "eg-head");
+    head.innerHTML = `<strong>${val.label}</strong> <span style="font-size:0.8em;opacity:0.6">(${key})</span>`;
+    
+    const delPartBtn = el("button", "btn btn-danger btn-sm", "刪除部位");
+    delPartBtn.onclick = () => {
+      if(confirm(`確定刪除「${val.label}」及其所有動作？`)) {
+        delete CATALOG[key];
+        renderEditor();
+      }
+    };
+    head.appendChild(delPartBtn);
+    box.appendChild(head);
+
+    // 動作列表
+    const ul = el("ul", "eg-list");
+    val.exercises.forEach((ex, idx) => {
+      const li = el("li", "eg-item");
+      li.innerHTML = `<span>${ex}</span>`;
+      const delExBtn = el("button", "btn btn-danger btn-sm", "×");
+      delExBtn.onclick = () => {
+        val.exercises.splice(idx, 1);
+        renderEditor();
+      };
+      li.appendChild(delExBtn);
+      ul.appendChild(li);
+    });
+    box.appendChild(ul);
+
+    // 新增動作
+    const addRow = el("div", "eg-add-row");
+    const input = el("input", "eg-input");
+    input.placeholder = "輸入新動作...";
+    const addBtn = el("button", "btn btn-primary btn-sm", "新增");
+    
+    const doAdd = () => {
+      if(input.value.trim()){
+        val.exercises.push(input.value.trim());
+        renderEditor();
+      }
+    };
+    addBtn.onclick = doAdd;
+    input.onkeydown = (e) => { if(e.key==="Enter") doAdd(); };
+
+    addRow.append(input, addBtn);
+    box.appendChild(addRow);
+    
+    editorContainer.appendChild(box);
+  });
+
+  // 最下方：新增全新部位
+  const newPartBox = el("div", "edit-group new-part-box");
+  newPartBox.innerHTML = `<div class="eg-head"><strong>＋ 新增一個部位類別</strong></div>`;
+  const npRow = el("div", "eg-add-row");
+  
+  const keyInput = el("input", "eg-input"); keyInput.placeholder = "ID (英文,如 legs)";
+  const labelInput = el("input", "eg-input"); labelInput.placeholder = "顯示名稱 (如 臀腿)";
+  const npBtn = el("button", "btn btn-primary btn-sm", "新增");
+  
+  npBtn.onclick = () => {
+    const k = keyInput.value.trim();
+    const l = labelInput.value.trim();
+    if(k && l){
+      if(CATALOG[k]) { alert("這個 ID 已經存在了"); return; }
+      CATALOG[k] = { label: l, exercises: [] };
+      renderEditor();
+    } else {
+      alert("請輸入 ID (英文) 與 顯示名稱");
+    }
+  };
+  npRow.append(keyInput, labelInput, npBtn);
+  newPartBox.appendChild(npRow);
+  editorContainer.appendChild(newPartBox);
+}
+
+// 綁定設定頁儲存按鈕
+saveCatalogBtn?.addEventListener("click", async () => {
+  saveCatalogBtn.disabled = true;
+  saveCatalogBtn.textContent = "儲存中...";
+  try {
+    const r = await fetch(API_BASE, {
+      method: "POST",
+      body: JSON.stringify({ type: "config", catalog: CATALOG }), 
+    });
+    const j = await r.json();
+    if(j.ok) {
+      alert("設定已儲存！");
+      renderBottomNav();
+      renderActionNav();
+    } else {
+      alert("儲存失敗：" + j.error);
+    }
+  } catch(e) {
+    alert("連線錯誤");
+    console.error(e);
+  }
+  saveCatalogBtn.disabled = false;
+  saveCatalogBtn.textContent = "儲存變更到雲端";
+});
 
 // ====== Tabs Switching ======
 tabs.forEach(btn=>{
