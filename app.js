@@ -1,18 +1,22 @@
-// ====== Catalog (預設值，實際會從後端讀取) ======
+// ====== Catalog (預設值) ======
 let CATALOG = {
   chest: { label: "胸", exercises: ["啞鈴臥推"] } 
 };
 
 const MAX_SETS = 4; // 每動作最多四組
 
-// ====== 狀態（主頁） ======
-let currentPart = "chest";
-const blocks = []; // [{id, part, actionIdx, ended, temp:{reps,weight}, sets:[{reps,weight}], activeSetIdx}]
+// ====== 狀態 ======
+let currentPart = null; 
+let currentActionIdx = null; 
+const blocks = []; 
 let idCounter = 1;
-let importedRows = []; // 儲存從後端抓回來的資料
+let GLOBAL_LAST_END_TIME = null; 
+let importedRows = []; 
+let myChart = null;
+let chartUnit = "kg"; 
+let displayUnit = "kg"; 
 
 // ====== DOM ======
-// Main
 const appRoot   = document.getElementById("appRoot");
 const bottomNav = document.getElementById("bottomNav");
 const actionNav = document.getElementById("actionNav");
@@ -20,7 +24,7 @@ const finishDayBtn = document.getElementById("finishDay");
 const clearAll  = document.getElementById("clearAll");
 const calSideTitle = document.getElementById("calSideTitle");
 const calSideList  = document.getElementById("calSideList");
-let selectedCalDate = ""; // "YYYY/MM/DD"
+let selectedCalDate = ""; 
 
 // Export panel
 const exportPanel       = document.getElementById("exportPanel");
@@ -28,24 +32,24 @@ const exportTbody       = document.getElementById("exportTableBody");
 const closeExportBtn    = document.getElementById("closeExportBtn");
 const confirmAppendBtn  = document.getElementById("confirmAppendBtn");
 
-// Settings Editor DOM
+// Settings
 const editorContainer = document.getElementById("editor-container");
 const saveCatalogBtn = document.getElementById("saveCatalogBtn");
 
-// Tabs & Pages
+// Tabs
 const tabs = [...document.querySelectorAll(".tab-btn")];
 const pages = {
   main: document.getElementById("page-main"),
   calendar: document.getElementById("page-calendar"),
   records: document.getElementById("page-records"),
-  settings: document.getElementById("page-settings") // 確保這裡抓得到
+  settings: document.getElementById("page-settings") 
 };
 
 // Records page
 const recordsPartRow   = document.getElementById("recordsPartChips");
 const recordsActionRow = document.getElementById("recordsActionChips");
 const recordsTbody   = document.getElementById("recordsTbody");
-let recFilterPart = "";   // 儲存 chips 選擇
+let recFilterPart = "";   
 let recFilterAction = "";
 
 // Calendar page
@@ -66,6 +70,28 @@ const fmtSetLine = s => {
   return `${lb} lb (${kg} kg) · ${s.reps} 下`;
 };
 
+// 秒數格式化 (65 -> 1:05)
+function fmtDuration(ms){
+  if(!ms && ms !== 0) return "";
+  const sec = Math.round(ms / 1000); 
+  if(sec <= 0) return "0:00";
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return `${m}:${String(s).padStart(2,'0')}`;
+}
+
+// ====== 全域計時器 ======
+setInterval(() => {
+  const activeB = blocks.find(b => b.isWorking && !b.ended);
+  if (activeB && activeB.currentSetStart) {
+    const el = document.getElementById(`timer-${activeB.id}`);
+    if (el) {
+      const diff = Date.now() - activeB.currentSetStart;
+      el.textContent = fmtDuration(diff);
+    }
+  }
+}, 500);
+
 // ===== 轉盤工具 =====
 function rangeArray(min, max, step=1){
   const out = [];
@@ -74,15 +100,12 @@ function rangeArray(min, max, step=1){
 }
 
 const ITEM_H = 44;     
-const WHEEL_H = 140;   
+const WHEEL_H = 132;   
 const SPACER_COUNT = 1; 
-
-// === 單位設定 ===
 const LB_STEP = 2.5;       
 const LB_MAX  = 60;       
 const KG_PER_LB = 0.45359237;
 
-// 換算
 const lbToKg = (lb)=> lb * KG_PER_LB;
 const kgToLb = (kg)=> kg / KG_PER_LB;
 
@@ -91,37 +114,14 @@ function kgToNearestLbStep(kg){
   return Math.round(lb / LB_STEP) * LB_STEP;
 }
 
-/**
- * 建立輪盤內容
- */
 function buildWheel(elem, values, initialValue, onChange){
   elem.innerHTML = "";
-
-  // 建立頂部 spacer
-  for (let i=0;i<SPACER_COUNT;i++){
-    const sp = document.createElement("div");
-    sp.className = "opt spacer";
-    sp.textContent = "-1";
-    elem.appendChild(sp);
-  }
-  // 建立選項
-  values.forEach(v=>{
-    const d = document.createElement("div");
-    d.className = "opt";
-    d.dataset.value = v;
-    d.textContent = v;
-    elem.appendChild(d);
-  });
-  // 建立底部 spacer
-  for (let i=0;i<SPACER_COUNT;i++){
-    const sp = document.createElement("div");
-    sp.className = "opt spacer";
-    sp.textContent = "-1";
-    elem.appendChild(sp);
-  }
+  for (let i=0;i<SPACER_COUNT;i++){ const sp=el("div","opt spacer","-1"); elem.appendChild(sp); }
+  values.forEach(v=>{ const d=el("div","opt",v); d.dataset.value=v; elem.appendChild(d); });
+  for (let i=0;i<SPACER_COUNT;i++){ const sp=el("div","opt spacer","-1"); elem.appendChild(sp); }
 
   const children = [...elem.children];
-  let isInitializing = true; // ★ 新增：初始化旗標
+  let isInitializing = true; 
 
   const highlightAndEmit = (realIdx, shouldEmit = true)=>{
     children.forEach(c=>c.classList.remove("active"));
@@ -129,95 +129,67 @@ function buildWheel(elem, values, initialValue, onChange){
     const el = children[childIdx];
     if (el){
       el.classList.add("active");
-      // ★ 只有在非初始化狀態，且允許 emit 時才寫入資料
-      if(!isInitializing && shouldEmit){
-        onChange?.(Number(values[realIdx]));
-      }
+      if(!isInitializing && shouldEmit){ onChange?.(Number(values[realIdx])); }
     }
   };
 
   const scrollToRealIdx = (realIdx, smooth=true)=>{
     const childIdx = realIdx + SPACER_COUNT;
-    // ★ 修正計算公式：確保數學完美置中 (因為 CSS 改成了 132px)
     const targetTop = childIdx * ITEM_H + (ITEM_H/2 - elem.clientHeight/2);
     elem.scrollTo({ top: Math.max(0, targetTop), behavior: smooth ? "smooth" : "auto" });
-    highlightAndEmit(realIdx, false); // 捲動當下不急著 emit，等 scroll 事件確認
+    highlightAndEmit(realIdx, false); 
   };
 
-  // 捲動監聽
   let timer = null;
   elem.addEventListener("scroll", ()=>{
-    if(isInitializing) return; // ★ 初始化時的捲動直接忽略，避免數值亂跳
-
+    if(isInitializing) return; 
     clearTimeout(timer);
     timer = setTimeout(()=>{
       const center = elem.scrollTop + elem.clientHeight/2;
       let childIdx = Math.round(center / ITEM_H - 0.5);
       let realIdx = childIdx - SPACER_COUNT;
       realIdx = Math.min(Math.max(realIdx, 0), values.length - 1);
-      
-      // 這裡才是真正更新數據的地方
       highlightAndEmit(realIdx, true); 
-    }, 50); // 時間縮短一點，反應快一點
+    }, 50);
   });
 
   elem.addEventListener("click",(e)=>{
     const opt = e.target.closest(".opt");
     if (!opt) return;
-    const childrenArr = [...elem.children];
-    const childIdx = childrenArr.indexOf(opt);
+    const childIdx = [...elem.children].indexOf(opt);
     let realIdx = childIdx - SPACER_COUNT;
     realIdx = Math.min(Math.max(realIdx, 0), values.length - 1);
     scrollToRealIdx(realIdx);
-    
-    // 點擊可以強制更新
-    setTimeout(()=> {
-        isInitializing = false; 
-        highlightAndEmit(realIdx, true); 
-    }, 300);
+    setTimeout(()=> { isInitializing = false; highlightAndEmit(realIdx, true); }, 300);
   });
 
-  // 初始化定位
   const initRealIdx = Math.max(0, values.indexOf(initialValue));
   setTimeout(()=> {
-    scrollToRealIdx(initRealIdx, false); // 瞬間定位，不滑動
-    // ★ 延遲解開鎖定，確保初始化捲動結束後才開始監聽
+    scrollToRealIdx(initRealIdx, false); 
     setTimeout(()=>{ isInitializing = false; }, 200);
   }, 0);
 }
 
-// ====== 與後端互動 (Apps Script) ======
+// ====== API ======
 const API_BASE = "https://script.google.com/macros/s/AKfycbwy1VKGICqMwjax01HpCvYChWOuJW0H448qP9bSzJ--v9yYD8wbYrCR9aT5vYkjLBlYow/exec";
 
 async function apiLoadRows(){
   const r = await fetch(API_BASE);
   const j = await r.json();
   if (!j.ok) throw new Error(j.error || "load failed");
-  
-  if (j.catalog && Object.keys(j.catalog).length > 0) {
-    CATALOG = j.catalog;
-    // 這裡不直接呼叫 render，避免初始載入時重複渲染
-  }
-
+  if (j.catalog && Object.keys(j.catalog).length > 0) CATALOG = j.catalog;
   const rows = j.rows || [];
-
   return rows.map(row => {
     const d = new Date(row["日期"]);
     const logicalDate = new Date(d);
-    if (logicalDate.getHours() < 7) {
-      logicalDate.setDate(logicalDate.getDate() - 1);
-    }
+    if (logicalDate.getHours() < 7) logicalDate.setDate(logicalDate.getDate() - 1);
     row._dateStr = ymd(logicalDate);
     return row;
   });
 }
 
 async function apiAppendRows(rows){
-  const r = await fetch(API_BASE, {
-    method: "POST",
-    body: JSON.stringify({ rows: rows }), 
-  });
-  
+  const r = await fetch(API_BASE, { method: "POST", body: JSON.stringify({ rows: rows }) });
   const j = await r.json();
   if (!j.ok) throw new Error(j.error || "append failed");
   return j.appended || 0;
@@ -227,7 +199,7 @@ async function reloadFromBackend(){
   importedRows = await apiLoadRows();
   renderRecordsFilters(importedRows);
   renderRecordsTable();
-  renderBottomNav(); // 確保 Catalog 更新後重繪導覽
+  renderBottomNav(); 
   renderActionNav();
 }
 
@@ -245,82 +217,114 @@ function getLastDefaultsFromCsv(partZh, actionName){
   return { weight:0, reps:10 };
 }
 
-// ====== Main Page Logic ======
-function createBlock(part = currentPart, actionIdx = 0){
-  const b = { id:idCounter++, part, actionIdx, ended:false, temp:{reps:10, weight:0}, sets:[], activeSetIdx:null };
+// ====== Main Logic ======
+function createBlock(part, actionIdx){
+  const b = { 
+    id: idCounter++, 
+    part, actionIdx, ended: false, 
+    temp: { reps:10, weight:0 }, 
+    sets: [], activeSetIdx: null,
+    isWorking: false, currentSetStart: null, currentWorkStart: null, tempRestTime: 0 
+  };
   blocks.push(b);
   return b;
 }
+
 function getActiveBlock(){
   for (let i = blocks.length - 1; i >= 0; i--) if (!blocks[i].ended) return blocks[i];
-  return createBlock();
+  return undefined; 
 }
 
 function renderMain(){
   appRoot.innerHTML = "";
-  blocks.forEach((b) => {
-    const node = renderBlock(b);
-    appRoot.appendChild(node);
-  });
+  blocks.forEach((b) => { appRoot.appendChild(renderBlock(b)); });
   renderBottomNav();
   renderActionNav();
 }
 
 function renderBlock(b){
   const wrap = el("section","block" + (b.ended ? " disabled" : ""));
-  const left = el("div","left card");
-  left.append(el("div")); 
-
-  let listWrap; 
-  let hint;
-
-  const head = el("div","summary");
-  const headLeft = el("div");
-  // 防呆：如果 CATALOG 裡沒這個 key，就給個預設顯示
-  const catData = CATALOG[b.part] || { label: b.part, exercises: [] };
   
+  // Left
+  const leftCol = el("div", "block-left-col");
+  const head = el("div","summary");
+  const headTop = el("div", "summary-top");
+  
+  const headInfo = el("div", "head-info");
+  const catData = CATALOG[b.part] || { label: b.part, exercises: [] };
   const tag = el("span","tag", catData.label);
   const hname = el("span","hname", catData.exercises[b.actionIdx] || "");
-  const sText = el("div","text");
+  headInfo.append(tag, hname);
 
-  const headRight = el("div","actions");
-  const nextBtn = el("button","btn btn-primary","完成這一組");
-  const endBtn  = el("button","btn btn-danger","下一個動作");
-  headRight.append(nextBtn, endBtn);
+  // 右側刪除鈕
+  const headRight = el("div");
+  if(b.ended){
+    // 結束時隱藏刪除鈕，避免跳動 (文字改在狀態欄顯示)
+  } else {
+    const delBlockBtn = el("button", "del-btn", "✕");
+    delBlockBtn.style.fontSize = "1.5rem";
+    delBlockBtn.onclick = () => {
+      if(confirm("確定要刪除這個動作紀錄嗎？")){
+        const idx = blocks.indexOf(b);
+        if(idx > -1) blocks.splice(idx, 1);
+        if(blocks.length === 0) { currentActionIdx = null; GLOBAL_LAST_END_TIME = null; }
+        renderMain();
+        renderActionNav();
+      }
+    };
+    headRight.append(delBlockBtn);
+  }
+  headTop.append(headInfo, headRight);
 
-  headLeft.append(tag, hname);
-  head.append(headLeft, sText, headRight);
-  left.append(head);
+  const sText = el("div","text"); 
+  head.append(headTop, sText);
 
   const pickerWrap = el("div","picker");
-  const colW = el("div","col");
-  colW.append(el("div","lab","重量"));
-  const wheelW = el("div","wheel");      
-  colW.append(wheelW, el("div","lab2","lb"));
-  const colR = el("div","col");
-  colR.append(el("div","lab","幾下"));
-  const wheelR = el("div","wheel");      
-  colR.append(wheelR, el("div","lab2","下"));
-
+  const colW = el("div","col"); colW.append(el("div","lab","重量"));
+  const wheelW = el("div","wheel"); colW.append(wheelW, el("div","lab2","lb"));
+  const colR = el("div","col"); colR.append(el("div","lab","幾下"));
+  const wheelR = el("div","wheel"); colR.append(wheelR, el("div","lab2","下"));
   pickerWrap.append(colW, colR);
-  left.append(pickerWrap);
 
-  const right = el("div","right card");
-  right.append(el("div","title","本動作紀錄（最多 4 組）"));
-  listWrap = el("ul","set-list");   
-  right.append(listWrap);
-  hint = el("div","hint");
-  right.append(hint);
+  const btnGroup = el("div", "action-btn-group");
+  const actionBtn = el("button", "btn"); 
+  actionBtn.style.width = "100%";
+  btnGroup.append(actionBtn);
+  leftCol.append(head, pickerWrap, btnGroup);
 
+  // Right
+  const rightCol = el("div", "block-right-col");
+  rightCol.append(el("div","title","本動作紀錄")); // CSS會隱藏它
+  const listWrap = el("ul","set-list");   
+  listWrap.style.flex = "1"; 
+  const rightFooter = el("div", "right-col-footer");
+  const endBtn  = el("button", "btn btn-danger", "結束此動作");
+  endBtn.style.width = "100%";
+  rightFooter.append(endBtn);
+  rightCol.append(listWrap, rightFooter);
+
+  // Update logic
   const updateSummary = ()=>{
-    if (b.ended){ sText.textContent=""; return; }
-    const src  = (b.activeSetIdx===null) ? b.temp : b.sets[b.activeSetIdx];
-    let idx    = (b.activeSetIdx===null) ? (b.sets.length+1) : (b.activeSetIdx+1);
-    const kg = Number(src.weight)||0;
-    const lb = kgToNearestLbStep(kg);
-    sText.textContent = (idx>MAX_SETS)
-      ? "已完成四組"
-      : `${lb} lb (${kg} kg) · ${src.reps} 下 · 第 ${idx} 組`;
+    if (b.ended){ 
+      sText.textContent = "✓ 此動作已完成"; 
+      sText.style.color = "var(--text-muted)";
+      return; 
+    }
+    const idx = (b.activeSetIdx===null) ? (b.sets.length+1) : (b.activeSetIdx+1);
+    if (b.isWorking) {
+        sText.innerHTML = `🔥 第 ${idx} 組進行中... <span id="timer-${b.id}" class="timer-text">0:00</span>`;
+        sText.style.color = "#4ade80"; 
+        actionBtn.textContent = "完成這一組";
+        actionBtn.className = "btn btn-danger"; 
+    } else {
+        const src = (b.activeSetIdx===null) ? b.temp : b.sets[b.activeSetIdx];
+        const kg = Number(src.weight)||0;
+        const lb = kgToNearestLbStep(kg);
+        sText.textContent = (idx > MAX_SETS) ? "已完成四組訓練" : `準備：${lb} lb (${kg} kg) · ${src.reps} 下`;
+        sText.style.color = "var(--accent)";
+        actionBtn.textContent = (idx > MAX_SETS) ? "已完成四組" : "開始這一組";
+        actionBtn.className = "btn btn-primary"; 
+    }
   };
 
   function rebuildWheels(){                          
@@ -328,159 +332,140 @@ function renderBlock(b){
     const src = editingExisting ? b.sets[b.activeSetIdx] : b.temp;
     const lbValues = []; for (let lb=0; lb<=LB_MAX; lb+=LB_STEP) lbValues.push(lb);
     const initLb = kgToNearestLbStep(Number(src.weight)||0);
-
     buildWheel(wheelW, lbValues, initLb, (valLb)=>{
       const valKg = Math.round(lbToKg(valLb)*10)/10;
-      if (b.activeSetIdx===null) b.temp.weight = valKg;
-      else b.sets[b.activeSetIdx].weight = valKg;
-      updateSummary(); renderSetList(listWrap, b);
+      if (b.activeSetIdx===null) b.temp.weight = valKg; else b.sets[b.activeSetIdx].weight = valKg;
+      const idx = (b.activeSetIdx===null) ? (b.sets.length+1) : (b.activeSetIdx+1);
+      if(!b.isWorking && idx <= MAX_SETS) {
+         const lb = kgToNearestLbStep(valKg);
+         sText.textContent = `準備：${lb} lb (${valKg} kg) · ${src.reps} 下`;
+      }
     });
     buildWheel(wheelR, rangeArray(1,20,1), Number(src.reps)||10, (val)=>{
-      if (b.activeSetIdx===null) b.temp.reps = val;
-      else b.sets[b.activeSetIdx].reps = val;
-      updateSummary(); renderSetList(listWrap, b);
+      if (b.activeSetIdx===null) b.temp.reps = val; else b.sets[b.activeSetIdx].reps = val;
+      const idx = (b.activeSetIdx===null) ? (b.sets.length+1) : (b.activeSetIdx+1);
+      if(!b.isWorking && idx <= MAX_SETS) {
+         const kg = Number(src.weight)||0; const lb = kgToNearestLbStep(kg);
+         sText.textContent = `準備：${lb} lb (${kg} kg) · ${val} 下`;
+      }
     });
   }
   rebuildWheels();                                   
 
   function refreshButtons(){
-    const onlyOnGhost = (b.activeSetIdx === null);
+    if (b.ended) {
+        actionBtn.style.display = "none";
+        endBtn.disabled = true; endBtn.textContent = "已完成此動作"; endBtn.className = "btn"; endBtn.style.opacity = "0.5";
+        wheelW.style.opacity = "0.5"; wheelW.style.pointerEvents = "none";
+        wheelR.style.opacity = "0.5"; wheelR.style.pointerEvents = "none";
+        return;
+    }
     const full = b.sets.length >= MAX_SETS;
-    nextBtn.disabled = b.ended || !onlyOnGhost || full;
-    nextBtn.textContent = full ? "已完成四組" : "完成這一組";
-    const hasAnySet = b.sets.length > 0;
-    endBtn.disabled = b.ended || !onlyOnGhost || !hasAnySet;
+    if (b.isWorking) {
+        actionBtn.style.display = "inline-flex"; actionBtn.disabled = false;
+        endBtn.disabled = true; endBtn.style.opacity = "0.5"; endBtn.textContent = "訓練進行中...";
+    } else {
+        actionBtn.style.display = "inline-flex"; actionBtn.disabled = full; 
+        if (b.sets.length > 0) { endBtn.disabled = false; endBtn.style.opacity = "1"; endBtn.textContent = "結束此動作"; } 
+        else { endBtn.disabled = true; endBtn.style.opacity = "0.5"; endBtn.textContent = "請先完成一組"; }
+    }
   }
 
-  function renderSetList(container, bRef){
+  function renderSetListInner(container, bRef){
     container.innerHTML = "";
-    const full = bRef.sets.length >= MAX_SETS;
-
-    // 1. 如果沒有任何組數 (Ghost State)
-    if (bRef.sets.length===0){
-      const ghost = el("li","set-item ghost"+(bRef.activeSetIdx===null?" active":"" ));
-      ghost.append(el("div","badge","第 1 組"));
-      ghost.append(el("div","sline", fmtSetLine(bRef.temp)));
-      ghost.addEventListener("click", ()=>{
-        bRef.activeSetIdx = null;
-        rebuildWheels(); updateSummary(); renderSetList(container, bRef); refreshButtons();
-      });
-      container.append(ghost);
-      hint.textContent = "調整數值後按「完成這一組」開始。";
-      return;
-    }
-
-    // 2. 渲染已存在的組數
-    hint.textContent = "";
     bRef.sets.slice(0, MAX_SETS).forEach((s, idx)=>{
-      const li = el("li","set-item"+(idx===bRef.activeSetIdx?" active":""));
+      if (s.restTime) container.append(el("div", "rest-separator", `休 ${fmtDuration(s.restTime)}`));
       
-      // 左側內容區 (點擊切換編輯)
+      const li = el("li","set-item"+(idx===bRef.activeSetIdx?" active":""));
       const infoDiv = el("div", "set-info");
-      infoDiv.style.flex = "1"; // 佔滿剩餘空間
-      infoDiv.append(el("div","badge",`第 ${idx+1} 組`), el("div","sline", fmtSetLine(s)));
+      
+      let workTag = "";
+      if (s.workTime) workTag = `<span class=\"work-tag\">⏱ ${fmtDuration(s.workTime)}</span>`;
+
+      infoDiv.innerHTML = `
+        <div class="set-info-row">
+            <div class="badge">第 ${idx+1} 組</div>
+            <div class="sline">${fmtSetLine(s)}</div>
+            ${workTag}
+        </div>
+      `;
+      
       infoDiv.addEventListener("click", ()=>{
+        if(bRef.isWorking) return; 
         bRef.activeSetIdx = idx;
-        rebuildWheels(); updateSummary(); renderSetList(container, bRef); refreshButtons();
+        rebuildWheels(); updateSummary(); renderSetListInner(container, bRef); refreshButtons();
       });
 
-      // ★ 右側刪除按鈕
-      const delBtn = el("button", "del-btn", "✕"); // 用乘號當叉叉
-      delBtn.title = "刪除此組";
+      const delBtn = el("button", "del-btn", "✕");
       delBtn.addEventListener("click", (e)=>{
-        e.stopPropagation(); // 阻止冒泡，避免觸發編輯
+        e.stopPropagation();
+        if(bRef.isWorking) { alert("請先完成目前這一組"); return; }
         if(confirm(`確定刪除第 ${idx+1} 組嗎？`)){
-          bRef.sets.splice(idx, 1); // 刪除資料
-          bRef.activeSetIdx = null; // 重置編輯狀態，避免錯亂
-          // 如果刪光了，把 temp 重置為最後一筆或預設
-          if(bRef.sets.length > 0) {
-             const last = bRef.sets[bRef.sets.length-1];
-             bRef.temp = { ...last };
-          }
-          rebuildWheels(); updateSummary(); renderSetList(container, bRef); refreshButtons();
+          bRef.sets.splice(idx, 1); bRef.activeSetIdx = null;
+          if(bRef.sets.length > 0) bRef.temp = { ...bRef.sets[bRef.sets.length-1] };
+          rebuildWheels(); updateSummary(); renderSetListInner(container, bRef); refreshButtons();
         }
       });
-
-      li.append(infoDiv, delBtn); // 注意這裡結構變了
+      li.append(infoDiv, delBtn);
       container.append(li);
     });
-
-    // 3. 預備下一組 (Ghost State)
-    if (!full && !bRef.ended){
-      const idx = bRef.sets.length;
-      const ghost = el("li","set-item ghost"+(bRef.activeSetIdx===null?" active":"" ));
-      ghost.append(el("div","badge",`第 ${idx+1} 組`), el("div","sline", fmtSetLine(bRef.temp)));
-      ghost.addEventListener("click", ()=>{
-        bRef.activeSetIdx = null;
-        rebuildWheels(); updateSummary(); renderSetList(container, bRef); refreshButtons();
-      });
-      container.append(ghost);
-    }
   }
 
+  renderSetListInner(listWrap, b);
   updateSummary();
-  refreshButtons();
-  renderSetList(listWrap, b);
+  refreshButtons(); 
 
-  nextBtn.addEventListener("click", ()=>{
+  actionBtn.addEventListener("click", ()=>{
     if (b.ended) return;
-    if (b.sets.length >= MAX_SETS) return;
-    const src = (b.activeSetIdx===null) ? b.temp : b.sets[b.activeSetIdx];
-    b.sets.push({ reps: src.reps, weight: src.weight });
-    b.temp = { reps: src.reps, weight: src.weight };
-    b.activeSetIdx = null;
-    rebuildWheels(); updateSummary(); renderSetList(listWrap, b); refreshButtons();
+    const now = Date.now();
+    if (!b.isWorking) {
+        b.isWorking = true; b.currentSetStart = now; 
+        let lastEnd = GLOBAL_LAST_END_TIME; 
+        let rest = 0; if(lastEnd) rest = now - lastEnd; b.tempRestTime = rest;
+        wheelW.style.opacity = "0.5"; wheelW.style.pointerEvents = "none";
+        wheelR.style.opacity = "0.5"; wheelR.style.pointerEvents = "none";
+        updateSummary(); refreshButtons();
+    } else {
+        b.isWorking = false;
+        let work = 0; if(b.currentSetStart) work = now - b.currentSetStart;
+        GLOBAL_LAST_END_TIME = now;
+        const src = (b.activeSetIdx===null) ? b.temp : b.sets[b.activeSetIdx];
+        if (b.activeSetIdx === null) {
+            b.sets.push({ reps: src.reps, weight: src.weight, restTime: b.tempRestTime, workTime: work });
+            b.temp = { reps: src.reps, weight: src.weight };
+        } else {
+            const old = b.sets[b.activeSetIdx];
+            b.sets[b.activeSetIdx] = { ...old, reps: src.reps, weight: src.weight };
+            b.activeSetIdx = null; 
+        }
+        wheelW.style.opacity = "1"; wheelW.style.pointerEvents = "auto";
+        wheelR.style.opacity = "1"; wheelR.style.pointerEvents = "auto";
+        rebuildWheels(); updateSummary(); renderSetListInner(listWrap, b); refreshButtons();
+    }
   });
 
   endBtn.addEventListener("click", ()=>{
     if (b.ended) return;
-    b.ended = true;
-    wrap.classList.add("disabled");
-    updateSummary();
-    createBlock(currentPart, 0);
-    const nb = getActiveBlock();
-    const partZh = CATALOG[nb.part]?.label || nb.part;
-    const name   = CATALOG[nb.part]?.exercises[nb.actionIdx] || "";
-    const last   = getLastDefaultsFromCsv(partZh, name);
-    nb.temp = { reps:last.reps, weight:last.weight };
-    renderMain();
+    if (confirm("確定結束此動作？")){
+        b.ended = true; wrap.classList.add("disabled");
+        updateSummary(); refreshButtons();
+        currentActionIdx = null; renderActionNav(); renderMain();
+    }
   });
-
-  wrap.append(left, right);
+  wrap.append(leftCol, rightCol);
   return wrap;
 }
 
 function renderBottomNav(){
   bottomNav.innerHTML = "";
   Object.entries(CATALOG).forEach(([k,v])=>{
-    // 這裡結構改了：按鈕裡面包一個 span
     const btn = el("button","nav-btn"+(k===currentPart?" active":""));
-    const span = el("span", "", v.label);
-    btn.appendChild(span);
-
+    btn.appendChild(el("span", "", v.label));
     btn.addEventListener("click",()=>{
-      currentPart = k;
-      
-      const b = getActiveBlock();
-      if(b.sets.length > 0) {
-        b.ended = true;
-        const allBlocks = document.querySelectorAll('.block');
-        const lastBlockNode = allBlocks[allBlocks.length-1];
-        if(lastBlockNode) lastBlockNode.classList.add('disabled');
-        createBlock(currentPart, 0);
-      } else {
-        b.part = currentPart;
-        b.actionIdx = 0;
-      }
-
-      const nb = getActiveBlock();
-      const partZh = CATALOG[nb.part]?.label || nb.part;
-      const name   = CATALOG[nb.part]?.exercises[nb.actionIdx] || "";
-      const last   = getLastDefaultsFromCsv(partZh, name);
-      nb.temp = { reps:last.reps, weight:last.weight };
-      
-      renderActionNav();
-      renderMain();
+      const activeB = getActiveBlock();
+      if (activeB && !activeB.ended) { alert("請先完成或刪除目前的動作，才能切換部位！"); return; }
+      currentPart = k; currentActionIdx = null; 
+      renderBottomNav(); renderActionNav(); 
     });
     bottomNav.append(btn);
   });
@@ -488,441 +473,192 @@ function renderBottomNav(){
 
 function renderActionNav(){
   actionNav.innerHTML = "";
+  if(!currentPart) return; 
   const catData = CATALOG[currentPart];
-  if(!catData) return; // 防呆
-
-  const list = catData.exercises;
-  const activeBlock = getActiveBlock();
-  
-  list.forEach((name, i)=>{
-    const chip = el("div","action-chip"+(i===activeBlock.actionIdx?" active":""), name);
+  if(!catData) return;
+  const activeB = getActiveBlock();
+  catData.exercises.forEach((name, i)=>{
+    const isActive = (activeB && activeB.part === currentPart && activeB.actionIdx === i);
+    const chip = el("div","action-chip"+(isActive?" active":""), name);
     chip.addEventListener("click",()=>{
-      const b = getActiveBlock();
-      b.part = currentPart;
-      b.actionIdx = i;
-      const partZh = CATALOG[b.part].label;
-      const nm   = CATALOG[b.part].exercises[b.actionIdx] || "";
+      const currentActive = getActiveBlock();
+      if (currentActive && !currentActive.ended) {
+        if (currentActive.part === currentPart && currentActive.actionIdx === i) return;
+        alert("請先完成或刪除目前的動作，才能選擇下一個動作！"); return;
+      }
+      currentActionIdx = i;
+      createBlock(currentPart, i);
+      const nb = getActiveBlock();
+      const partZh = CATALOG[nb.part].label;
+      const nm   = CATALOG[nb.part].exercises[nb.actionIdx];
       const last = getLastDefaultsFromCsv(partZh, nm);
-      b.temp = { reps:last.reps, weight:last.weight };
-      renderMain();
+      nb.temp = { reps:last.reps, weight:last.weight };
+      renderActionNav(); renderMain();      
     });
     actionNav.append(chip);
   });
 }
 
-// ====== Export / Write to Excel ======
+// ====== Export ======
 function blockToRow(b, dateStr){
   const part = CATALOG[b.part]?.label || b.part;
   const action = CATALOG[b.part]?.exercises[b.actionIdx] || "";
-  const reps = [0,0,0,0], wts = [0,0,0,0];
-  b.sets.slice(0,4).forEach((s,i)=>{ reps[i]=s.reps||0; wts[i]=s.weight||0; });
-  return { "日期":dateStr,"部位":part,"動作":action,
+  const reps=[0,0,0,0], wts=[0,0,0,0], rests=[0,0,0,0], works=[0,0,0,0];
+  b.sets.slice(0,4).forEach((s,i)=>{ 
+    reps[i]=s.reps||0; wts[i]=s.weight||0; 
+    rests[i]=Math.round((s.restTime||0)/1000); works[i]=Math.round((s.workTime||0)/1000);
+  });
+  return { 
+    "日期":dateStr,"部位":part,"動作":action,
     "組1":reps[0],"組2":reps[1],"組3":reps[2],"組4":reps[3],
-    "重1":wts[0],"重2":wts[1],"重3":wts[2],"重4":wts[3] };
+    "重1":wts[0],"重2":wts[1],"重3":wts[2],"重4":wts[3],
+    "休1":rests[0],"秒1":works[0],"休2":rests[1],"秒2":works[1],
+    "休3":rests[2],"秒3":works[2],"休4":rests[3],"秒4":works[3]
+  };
 }
 function collectTodayRows(){
   const nowISO = new Date().toISOString(); 
   return blocks.filter(b=>b.sets.length>0).map(b=>blockToRow(b, nowISO));
 }
-// ====== 優化後的 Export Logic ======
-
-// 1. 產生簡易預覽 HTML (取代原本的 Table)
 function renderExportPreview(rows){
-  const container = document.getElementById("exportTableBody"); // 沿用原本的 ID，但 CSS 改了用途
-  if(!container) return;
-  container.innerHTML = "";
-  container.className = "export-preview"; // 切換 class
-
+  const container = document.getElementById("exportTableBody");
+  if(!container) return; container.innerHTML = ""; container.className = "export-preview";
   rows.forEach(r => {
-    // 簡單顯示： 啞鈴臥推 x 4組
     let setDesc = [];
-    for(let i=1; i<=4; i++) {
-        if(r[`組${i}`] > 0) setDesc.push(`${r[`組${i}`]}x${r[`重${i}`]}`);
-    }
+    for(let i=1; i<=4; i++) { if(r[`組${i}`] > 0) setDesc.push(`${r[`組${i}`]}x${r[`重${i}`]}`); }
     const div = el("div", "ep-row");
     div.innerHTML = `<span>${r["動作"]}</span> <span style="color:#888">${setDesc.length} 組</span>`;
     container.appendChild(div);
   });
 }
-
-// 2. 修改按鈕事件
-finishDayBtn?.addEventListener("click", ()=>{
-  const rows = collectTodayRows();
-  if (!rows.length){ alert("尚未有任何組數紀錄。"); return; }
-  
-  // 更新標題與內容
-  document.getElementById("exportTitle").textContent = "本次運動總結";
-  // 插入一段提示文字 (如果有需要)
-  const previewBox = document.getElementById("exportTableBody");
-  renderExportPreview(rows);
-  
-  exportPanel.classList.remove("hidden");
-});
-
 function resetMainFromCsv(){
-  blocks.length = 0;
-  createBlock(currentPart, 0);
-  const b = getActiveBlock();
-  const partZh = CATALOG[b.part]?.label || b.part;
-  const name   = CATALOG[b.part]?.exercises[b.actionIdx] || "";
-  const last   = getLastDefaultsFromCsv(partZh, name);
-  b.temp = { reps: last.reps, weight: last.weight };
-  renderMain();
+  if(!confirm("確定要清除所有目前的訓練卡片嗎？")) return;
+  blocks.length = 0; idCounter = 1; currentPart = null; currentActionIdx = null; GLOBAL_LAST_END_TIME = null;
+  renderBottomNav(); renderActionNav(); renderMain();
 }
 
 finishDayBtn?.addEventListener("click", ()=>{
   const rows = collectTodayRows();
   if (!rows.length){ alert("尚未有任何組數紀錄。"); return; }
-  fillExportTable(rows);
+  document.getElementById("exportTitle").textContent = "本次運動總結";
+  renderExportPreview(rows);
   exportPanel.classList.remove("hidden");
 });
 closeExportBtn?.addEventListener("click", ()=> exportPanel.classList.add("hidden"));
-
 confirmAppendBtn?.addEventListener("click", async ()=>{
-  confirmAppendBtn.disabled = true;
-  confirmAppendBtn.textContent = "同步中...";
-
+  confirmAppendBtn.disabled = true; confirmAppendBtn.textContent = "同步中...";
   try{
     const rows = collectTodayRows();
     if (!rows.length){ alert("尚未有任何組數紀錄。"); confirmAppendBtn.disabled=false; return; }
-
     const appended = await apiAppendRows(rows); 
-    
     await reloadFromBackend(); 
-
-    exportPanel.classList.add("hidden");
-    resetMainFromCsv();
-
+    exportPanel.classList.add("hidden"); resetMainFromCsv();
     tabs.forEach(t => t.classList.remove("active"));
     document.querySelector('.tab-btn[data-tab="records"]')?.classList.add("active");
-    
     Object.values(pages).forEach(p => p.classList.remove("show"));
     pages.records.classList.add("show");
-    
     renderRecordsTable(); 
-
     alert(`同步成功！已儲存 ${appended} 筆紀錄。`);
-
-  }catch(e){
-    console.error(e);
-    alert("同步發生異常 (若 Google Sheet 已有資料請忽略)。\n" + e.message);
-  } finally {
-    confirmAppendBtn.disabled = false;
-    confirmAppendBtn.textContent = "完成";
-  }
+  }catch(e){ console.error(e); alert("同步發生異常\n" + e.message); } 
+  finally { confirmAppendBtn.disabled = false; confirmAppendBtn.textContent = "完成"; }
 });
-
 clearAll?.addEventListener("click", resetMainFromCsv);
 
-// ====== Records Filter ======
-function renderRecordsFilters(rows){
-  renderRecordsPartChips(rows);
-  renderRecordsActionChips(rows);
-}
-
+// ====== Records Filter & Table ======
+function renderRecordsFilters(rows){ renderRecordsPartChips(); renderRecordsActionChips(); }
 function renderRecordsPartChips(){
   const parts = [...new Set((importedRows||[]).map(r=>r["部位"]).filter(Boolean))];
   recordsPartRow.innerHTML = "";
-
   const allBtn = el("button","chip"+(recFilterPart===""?" active":""),"全部部位");
-  allBtn.addEventListener("click", ()=>{
-    recFilterPart = "";
-    recFilterAction = "";       
-    renderRecordsPartChips();
-    renderRecordsActionChips();
-    renderRecordsTable();
-  });
+  allBtn.addEventListener("click", ()=>{ recFilterPart=""; recFilterAction=""; renderRecordsPartChips(); renderRecordsActionChips(); renderRecordsTable(); });
   recordsPartRow.append(allBtn);
-
   parts.forEach(p=>{
     const btn = el("button","chip"+(recFilterPart===p?" active":""), p);
-    btn.addEventListener("click", ()=>{
-      recFilterPart = p;
-      recFilterAction = "";    
-      renderRecordsPartChips();
-      renderRecordsActionChips();
-      renderRecordsTable();
-    });
+    btn.addEventListener("click", ()=>{ recFilterPart=p; recFilterAction=""; renderRecordsPartChips(); renderRecordsActionChips(); renderRecordsTable(); });
     recordsPartRow.append(btn);
   });
 }
-
 function renderRecordsActionChips(){
   recordsActionRow.innerHTML = "";
-  let pool = (importedRows||[]);
-  if (recFilterPart) pool = pool.filter(r=>r["部位"]===recFilterPart);
-
+  let pool = (importedRows||[]); if (recFilterPart) pool = pool.filter(r=>r["部位"]===recFilterPart);
   const actions = [...new Set(pool.map(r=>r["動作"]).filter(Boolean))];
-
-  if (!recFilterPart){
-    const tip = el("div","muted","請先選擇上方的部位");
-    recordsActionRow.append(tip);
-    return;
-  }
-
+  if (!recFilterPart){ recordsActionRow.append(el("div","muted","請先選擇上方的部位")); return; }
   const allBtn = el("button","chip"+(recFilterAction===""?" active":""),"全部動作");
-  allBtn.addEventListener("click", ()=>{
-    recFilterAction = "";
-    renderRecordsActionChips();
-    renderRecordsTable();
-  });
+  allBtn.addEventListener("click", ()=>{ recFilterAction=""; renderRecordsActionChips(); renderRecordsTable(); });
   recordsActionRow.append(allBtn);
-
   actions.forEach(a=>{
     const btn = el("button","chip"+(recFilterAction===a?" active":""), a);
-    btn.addEventListener("click", ()=>{
-      recFilterAction = a;
-      renderRecordsActionChips();
-      renderRecordsTable();
-    });
+    btn.addEventListener("click", ()=>{ recFilterAction=a; renderRecordsActionChips(); renderRecordsTable(); });
     recordsActionRow.append(btn);
+  });
+}
+
+// Chart Logic
+function renderTrendChart(rows, actionName){
+  const container = document.querySelector('.chart-container');
+  const ctx = document.getElementById('progressChart');
+  if(!actionName || !rows || rows.length === 0){ if(container) container.style.display = 'none'; return; }
+  const dailyMaxMap = new Map();
+  rows.forEach(r => {
+    const weights = [r["重1"], r["重2"], r["重3"], r["重4"]].map(v=>Number(v)||0);
+    let maxW = Math.max(...weights); if(maxW <= 0) return;
+    if(chartUnit === "lb") maxW = kgToNearestLbStep(maxW);
+    const dStr = r._dateStr || r["日期"]; 
+    if(!dailyMaxMap.has(dStr)) dailyMaxMap.set(dStr, maxW); else dailyMaxMap.set(dStr, Math.max(dailyMaxMap.get(dStr), maxW));
+  });
+  const sortedDates = [...dailyMaxMap.keys()].sort();
+  const dataPoints = sortedDates.map(d => dailyMaxMap.get(d));
+  if(container) container.style.display = 'block';
+  if(myChart) myChart.destroy();
+  const accentColor = '#a855f7'; 
+  const unitLabel = chartUnit.toUpperCase();
+  myChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: sortedDates,
+      datasets: [{ label: `${actionName} - 最大重量 (${unitLabel})`, data: dataPoints, borderColor: accentColor, backgroundColor: 'rgba(168, 85, 247, 0.2)', borderWidth: 3, pointBackgroundColor: '#fff', pointRadius: 4, tension: 0.1, fill: true }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { labels: { color: '#fff' } }, tooltip: { mode: 'index', intersect: false, backgroundColor: 'rgba(30, 30, 40, 0.9)', titleColor: accentColor, bodyColor: '#fff', callbacks: { label: function(context) { return `${context.parsed.y} ${unitLabel}`; } } } },
+      scales: { x: { ticks: { color: '#9ca3af' }, grid: { color: 'rgba(255,255,255,0.1)' } }, y: { beginAtZero: false, ticks: { color: '#9ca3af' }, grid: { color: 'rgba(255,255,255,0.1)' }, title: { display: true, text: unitLabel, color: '#666' } } },
+      interaction: { mode: 'nearest', axis: 'x', intersect: false }
+    }
   });
 }
 
 function renderRecordsTable(){
   let rows = Array.isArray(importedRows) ? [...importedRows] : [];
-
-  if (recFilterPart)   rows = rows.filter(r => r["部位"] === recFilterPart);
+  if (recFilterPart) rows = rows.filter(r => r["部位"] === recFilterPart);
   if (recFilterAction) rows = rows.filter(r => r["動作"] === recFilterAction);
-
+  chartUnit = displayUnit; 
+  renderTrendChart(rows, recFilterAction);
   rows.sort((a,b)=> (a["日期"] < b["日期"] ? 1 : (a["日期"] > b["日期"] ? -1 : 0)));
-
   recordsTbody.innerHTML = "";
   rows.forEach(r=>{
     const tr = document.createElement("tr");
-    const cols = ["日期","部位","動作","組1","組2","組3","組4","重1","重2","重3","重4"];
-    cols.forEach(k=>{
-      const td = document.createElement("td");
-      if (k.startsWith("重")){
-        const kg = Number(r[k])||0;
-        const lb = kgToNearestLbStep(kg);
-        td.textContent = `${kg} kg (${lb} lb)`;
-      } else if (k === "日期") {
-        const raw = r["日期"] || "";
-        const clean = r._dateStr || raw.split("T")[0];
-        td.textContent = clean;
-      } else {
-        td.textContent = r[k] ?? "";
-      }
-      tr.appendChild(td);
-    });
+    const dateRaw = r["日期"] || ""; const cleanDate = r._dateStr || dateRaw.split("T")[0];
+    [cleanDate, r["部位"], r["動作"]].forEach(txt => { const td = document.createElement("td"); td.textContent = txt; tr.appendChild(td); });
+    for(let i=1; i<=4; i++){
+       const td = document.createElement("td");
+       const reps = Number(r[`組${i}`]) || 0; const weight = Number(r[`重${i}`]) || 0; const sec = Number(r[`秒${i}`]) || 0;
+       if(reps > 0 || weight > 0){
+           let wDisplay = "";
+           if(displayUnit === "lb"){ const lb = kgToNearestLbStep(weight); wDisplay = `${lb} lb`; } else { wDisplay = `${weight} kg`; }
+           let timeHtml = sec > 0 ? `<span style="font-size:0.7em; color:#4ade80;">⏱${sec}s</span>` : "";
+           td.innerHTML = `<div style="font-weight:bold; color:#fff;">${reps} 下</div><div class="cell-sub">${wDisplay}</div>${timeHtml}`;
+       } else { td.textContent = "-"; td.style.color = "#444"; }
+       tr.appendChild(td);
+    }
     recordsTbody.appendChild(tr);
   });
-}
-
-
-// ====== Calendar ======
-function renderCalendarWeekdays(){
-  const zh = ["日","一","二","三","四","五","六"];
-  calendarWeekdays.innerHTML = zh.map(w=>`<div class="weekday">${w}</div>`).join("");
-}
-function partDotClass(partZh){
-  const map = { "胸":"dot-chest","背":"dot-back","臀腿":"dot-legs","肩":"dot-shoulder","肱二頭":"dot-biceps","肱三頭":"dot-triceps","腰腹":"dot-core","前臂":"dot-cardio" };
-  return map[partZh] || "dot-core";
-}
-function renderCalendar(){
-  const rows = [...importedRows];
-
-  const partsByDate = {};
-  rows.forEach(r=>{
-    const raw = r["日期"] || "";
-    const dStr = r._dateStr || raw.split("T")[0].replace(/-/g, '/');
-    if (!dStr) return;
-    (partsByDate[dStr] = partsByDate[dStr] || new Set()).add(r["部位"]);
-  });
-
-  const y = calendarDate.getFullYear();
-  const m = calendarDate.getMonth();
-  const daysInMonth = new Date(y, m+1, 0).getDate();
-  const first = new Date(y, m, 1);
-  const startDow = first.getDay();
-
-  monthLabel.textContent = `${y}/${String(m+1).padStart(2,"0")}`;
-  calendarGrid.innerHTML = "";
-
-  const total = 42;
-  for (let i=0;i<total;i++){
-    const cell = el("div","day");
-    const dayNum = i - startDow + 1;
-    if (dayNum > 0 && dayNum <= daysInMonth){
-      const dateStr = ymd(new Date(y, m, dayNum));
-      cell.append(el("div","d", String(dayNum)));
-      
-      const badges = el("div","badges");
-      const parts = Array.from(partsByDate[dateStr] || []);
-      parts.forEach(p=>{
-        const dotCls = partDotClass(p);
-        const b = el("div","badge");
-        const dot = el("span",`dot ${dotCls}`);
-        b.append(dot); 
-        badges.append(b);
-      });
-      cell.append(badges);
-
-      cell.addEventListener("click", ()=>{
-        selectedCalDate = dateStr;
-        renderCalendar();
-        renderCalendarDetails();
-      });
-
-      if (selectedCalDate === dateStr) cell.classList.add("selected");
-    }
-    calendarGrid.append(cell);
+  const floatBtn = document.getElementById("toggleUnitFloatBtn");
+  if(floatBtn) {
+      floatBtn.textContent = `單位: ${displayUnit.toUpperCase()}`;
+      floatBtn.onclick = null; 
+      floatBtn.onclick = () => { displayUnit = (displayUnit === "lb" ? "kg" : "lb"); renderRecordsTable(); };
   }
-  
-  renderCalendarDetails();
 }
-
-function renderCalendarDetails(){
-  calSideList.innerHTML = "";
-  if (!selectedCalDate){
-    calSideTitle.textContent = "選擇日期查看詳情";
-    return;
-  }
-  calSideTitle.textContent = selectedCalDate;
-
-  const rows = (importedRows || []).filter(r => r._dateStr === selectedCalDate);
-
-  if (rows.length === 0){
-    const li = el("li","side-item");
-    li.textContent = "這一天沒有紀錄";
-    calSideList.append(li);
-    return;
-  }
-
-  rows.forEach(r=>{
-    const li = el("li","side-item");
-    const top = el("div","si-top");
-    top.append(el("span","", `${r["部位"]} · ${r["動作"]}`));
-    li.append(top);
-
-    const detail = el("div","si-sub");
-    const reps = [r["組1"], r["組2"], r["組3"], r["組4"]].map(n => Number(n)||0);
-    const wkg  = [r["重1"], r["重2"], r["重3"], r["重4"]].map(n => Number(n)||0);
-    
-    for (let i=0;i<4;i++){
-      if (reps[i] || wkg[i]){
-        const lb = kgToNearestLbStep(wkg[i]);
-        const line = el("div","si-line", `${reps[i]} 下  @  ${lb} lb (${wkg[i]} kg)`);
-        detail.append(line);
-      }
-    }
-    li.append(detail);
-    calSideList.append(li);
-  });
-}
-
-prevMonthBtn?.addEventListener("click", ()=>{ calendarDate = new Date(calendarDate.getFullYear(), calendarDate.getMonth()-1, 1); renderCalendar(); });
-nextMonthBtn?.addEventListener("click", ()=>{ calendarDate = new Date(calendarDate.getFullYear(), calendarDate.getMonth()+1, 1); renderCalendar(); });
-
-// ====== Settings Editor Logic ======
-function renderEditor(){
-  if(!editorContainer) return;
-  editorContainer.innerHTML = "";
-  
-  Object.entries(CATALOG).forEach(([key, val]) => {
-    const box = el("div", "edit-group");
-    
-    // 標題與刪除部位按鈕
-    const head = el("div", "eg-head");
-    head.innerHTML = `<strong>${val.label}</strong> <span style="font-size:0.8em;opacity:0.6">(${key})</span>`;
-    
-    const delPartBtn = el("button", "btn btn-danger btn-sm", "刪除部位");
-    delPartBtn.onclick = () => {
-      if(confirm(`確定刪除「${val.label}」及其所有動作？`)) {
-        delete CATALOG[key];
-        renderEditor();
-      }
-    };
-    head.appendChild(delPartBtn);
-    box.appendChild(head);
-
-    // 動作列表
-    const ul = el("ul", "eg-list");
-    val.exercises.forEach((ex, idx) => {
-      const li = el("li", "eg-item");
-      li.innerHTML = `<span>${ex}</span>`;
-      const delExBtn = el("button", "btn btn-danger btn-sm", "×");
-      delExBtn.onclick = () => {
-        val.exercises.splice(idx, 1);
-        renderEditor();
-      };
-      li.appendChild(delExBtn);
-      ul.appendChild(li);
-    });
-    box.appendChild(ul);
-
-    // 新增動作
-    const addRow = el("div", "eg-add-row");
-    const input = el("input", "eg-input");
-    input.placeholder = "輸入新動作...";
-    const addBtn = el("button", "btn btn-primary btn-sm", "新增");
-    
-    const doAdd = () => {
-      if(input.value.trim()){
-        val.exercises.push(input.value.trim());
-        renderEditor();
-      }
-    };
-    addBtn.onclick = doAdd;
-    input.onkeydown = (e) => { if(e.key==="Enter") doAdd(); };
-
-    addRow.append(input, addBtn);
-    box.appendChild(addRow);
-    
-    editorContainer.appendChild(box);
-  });
-
-  // 最下方：新增全新部位
-  const newPartBox = el("div", "edit-group new-part-box");
-  newPartBox.innerHTML = `<div class="eg-head"><strong>＋ 新增一個部位類別</strong></div>`;
-  const npRow = el("div", "eg-add-row");
-  
-  const keyInput = el("input", "eg-input"); keyInput.placeholder = "ID (英文,如 legs)";
-  const labelInput = el("input", "eg-input"); labelInput.placeholder = "顯示名稱 (如 臀腿)";
-  const npBtn = el("button", "btn btn-primary btn-sm", "新增");
-  
-  npBtn.onclick = () => {
-    const k = keyInput.value.trim();
-    const l = labelInput.value.trim();
-    if(k && l){
-      if(CATALOG[k]) { alert("這個 ID 已經存在了"); return; }
-      CATALOG[k] = { label: l, exercises: [] };
-      renderEditor();
-    } else {
-      alert("請輸入 ID (英文) 與 顯示名稱");
-    }
-  };
-  npRow.append(keyInput, labelInput, npBtn);
-  newPartBox.appendChild(npRow);
-  editorContainer.appendChild(newPartBox);
-}
-
-// 綁定設定頁儲存按鈕
-saveCatalogBtn?.addEventListener("click", async () => {
-  saveCatalogBtn.disabled = true;
-  saveCatalogBtn.textContent = "儲存中...";
-  try {
-    const r = await fetch(API_BASE, {
-      method: "POST",
-      body: JSON.stringify({ type: "config", catalog: CATALOG }), 
-    });
-    const j = await r.json();
-    if(j.ok) {
-      alert("設定已儲存！");
-      renderBottomNav();
-      renderActionNav();
-    } else {
-      alert("儲存失敗：" + j.error);
-    }
-  } catch(e) {
-    alert("連線錯誤");
-    console.error(e);
-  }
-  saveCatalogBtn.disabled = false;
-  saveCatalogBtn.textContent = "儲存變更到雲端";
-});
-
 
 // ====== Tabs Switching ======
 tabs.forEach(btn=>{
@@ -930,11 +666,10 @@ tabs.forEach(btn=>{
     tabs.forEach(b=>b.classList.remove("active"));
     btn.classList.add("active");
     const tab = btn.dataset.tab;
-    Object.values(pages).forEach(p=>p?.classList.remove("show"));
     
+    Object.values(pages).forEach(p=>p?.classList.remove("show"));
     if(pages[tab]) pages[tab].classList.add("show");
     
-    // 如果是設定頁，確保 container 顯示
     if(tab === "settings") {
       document.getElementById("page-settings")?.classList.add("show");
       renderEditor();
@@ -947,31 +682,10 @@ tabs.forEach(btn=>{
 
 // ====== Init ======
 (async function init(){
-  try { 
-      // 1. 先讀取後端 (這裡面會呼叫 renderBottomNav)
-      await reloadFromBackend(); 
-  } catch(e){ 
-      console.warn("後端連線中...", e); 
-  }
-  
+  try { await reloadFromBackend(); } catch(e){ console.warn("後端連線中...", e); }
   renderCalendarWeekdays();
-
-  // ★ 修正邏輯：先清空，確保乾淨
-  blocks.length = 0; 
-  idCounter = 1;
-
-  // 2. 建立「唯一」的一張初始卡片
-  createBlock(currentPart, 0);
-  
-  // 3. 帶入預設值
-  const b = getActiveBlock();
-  const partZh = CATALOG[b.part]?.label || b.part;
-  const name   = CATALOG[b.part]?.exercises[b.actionIdx] || "";
-  const last   = getLastDefaultsFromCsv(partZh, name);
-  b.temp = { reps:last.reps, weight:last.weight };
-
-  // 4. 最後再一次性渲染
-  await renderRecordsFilters(importedRows); // 確保 filter 有東西
+  blocks.length = 0; idCounter = 1; currentPart = null; currentActionIdx = null; GLOBAL_LAST_END_TIME = null;
+  if(importedRows.length > 0) renderRecordsFilters(importedRows); 
   renderRecordsTable();
-  renderMain();
+  renderBottomNav(); renderActionNav(); renderMain();
 })();
