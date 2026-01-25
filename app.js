@@ -208,30 +208,30 @@ async function apiLoadRows(){
   const j = await r.json();
   if (!j.ok) throw new Error(j.error || "load failed");
   
-  // 更新設定 (Config)
+  // 1. 如果後端有回傳 catalog 設定，就更新本地變數
   if (j.catalog && Object.keys(j.catalog).length > 0) {
     CATALOG = j.catalog;
+    // 因為動作列表變了，重畫導覽列
     renderBottomNav();
     renderActionNav();
   }
 
-  let rows = j.rows || [];
+  const rows = j.rows || [];
 
-  // ★ 這裡加入 7 點前算前一天的邏輯 ★
+  // 2. 處理每一筆資料的日期 (修復日曆顯示 + 7點前算前一天)
   return rows.map(row => {
-    // 1. 先把 Google Sheet 的 ISO 字串轉回 JS Date 時間物件
+    // 原始 row["日期"] 可能是 ISO (2026-01-25T02:00...)
     const d = new Date(row["日期"]);
     
-    // 2. 複製一份時間，用來計算「歸類日期」
+    // 複製一份時間來算「歸類日期」
     const logicalDate = new Date(d);
     
-    // 3. 如果「小時」小於 7，就讓這份歸類日期「倒退一天」
+    // ★ 關鍵：如果小於早上 7 點，算前一天
     if (logicalDate.getHours() < 7) {
       logicalDate.setDate(logicalDate.getDate() - 1);
     }
     
-    // 4. 產生給日曆用的 _dateStr (例如 2026/01/24)
-    // 這樣就算你是 1/25 凌晨 2 點練，日曆也會拿到 1/24 的字串
+    // 加上 _dateStr 屬性 (例如 "2026/01/24") 給日曆用
     row._dateStr = ymd(logicalDate);
     
     return row;
@@ -467,14 +467,30 @@ function renderBottomNav(){
     const btn = el("button","nav-btn"+(k===currentPart?" active":""), v.label);
     btn.addEventListener("click",()=>{
       currentPart = k;
+      
       const b = getActiveBlock();
-      b.part = currentPart;
-      b.actionIdx = 0; // 切部位預設第一個動作
-      // 帶入 CSV 預設
-      const partZh = CATALOG[b.part].label;
-      const name   = CATALOG[b.part].exercises[b.actionIdx] || "";
+      // ★ 修正邏輯：如果當前卡片已經有做幾組了，就結束它，開新的
+      // 如果當前卡片是空的，就直接切換它的部位
+      if(b.sets.length > 0) {
+        b.ended = true;
+        // 強制更新上一張卡片的狀態顯示
+        const allBlocks = document.querySelectorAll('.block');
+        const lastBlockNode = allBlocks[allBlocks.length-1];
+        if(lastBlockNode) lastBlockNode.classList.add('disabled');
+        
+        createBlock(currentPart, 0);
+      } else {
+        b.part = currentPart;
+        b.actionIdx = 0;
+      }
+
+      // 帶入該部位的第一個動作與預設重量
+      const nb = getActiveBlock();
+      const partZh = CATALOG[nb.part].label;
+      const name   = CATALOG[nb.part].exercises[nb.actionIdx] || "";
       const last   = getLastDefaultsFromCsv(partZh, name);
-      b.temp = { reps:last.reps, weight:last.weight };
+      nb.temp = { reps:last.reps, weight:last.weight };
+      
       renderActionNav();
       renderMain();
     });
@@ -515,7 +531,9 @@ function blockToRow(b, dateStr){
     "重1":wts[0],"重2":wts[1],"重3":wts[2],"重4":wts[3] };
 }
 function collectTodayRows(){
-  const nowISO = new Date().toISOString(); 
+  // 寫入當下最精確的 ISO 時間 (包含分秒)
+  // 這樣後續才能計算休息時間
+  const nowISO = new Date().toISOString();
   return blocks.filter(b=>b.sets.length>0).map(b=>blockToRow(b, nowISO));
 }
 function fillExportTable(rows){
@@ -551,30 +569,38 @@ finishDayBtn?.addEventListener("click", ()=>{
 closeExportBtn?.addEventListener("click", ()=> exportPanel.classList.add("hidden"));
 
 confirmAppendBtn?.addEventListener("click", async ()=>{
+  confirmAppendBtn.disabled = true;
+  confirmAppendBtn.textContent = "同步中...";
+
   try{
     const rows = collectTodayRows();
-    if (!rows.length){ alert("尚未有任何組數紀錄。"); return; }
+    if (!rows.length){ alert("尚未有任何組數紀錄。"); confirmAppendBtn.disabled=false; return; }
 
-    const appended = await apiAppendRows(rows);  // 寫入 Excel
-    await reloadFromBackend();                   // 更新紀錄/日曆
+    const appended = await apiAppendRows(rows); 
+    
+    await reloadFromBackend(); // 同步後端資料
 
     exportPanel.classList.add("hidden");
-
-    // ★ 寫入成功後，自動清空主頁當日紀錄
     resetMainFromCsv();
 
-    // 切到「紀錄」頁
-    tabs.forEach(b=>b.classList.remove("active"));
-    document
-      .querySelector('.tab-btn[data-tab="records"]')
-      ?.classList.add("active");
-    Object.values(pages).forEach(p=>p.classList.remove("show"));
-    pages.records?.classList.add("show");
+    // 跳轉到紀錄頁
+    tabs.forEach(t => t.classList.remove("active"));
+    document.querySelector('.tab-btn[data-tab="records"]')?.classList.add("active");
+    
+    Object.values(pages).forEach(p => p.classList.remove("show"));
+    pages.records.classList.add("show");
+    
+    renderRecordsTable(); 
 
-    alert(`已完成寫入 Excel（${appended} 筆）。`);
+    alert(`同步成功！已儲存 ${appended} 筆紀錄。`);
+
   }catch(e){
     console.error(e);
-    alert("寫入失敗，請確認本機後端 server.js 已啟動。");
+    // 溫和的錯誤提示
+    alert("同步發生異常 (若 Google Sheet 已有資料請忽略)。\n" + e.message);
+  } finally {
+    confirmAppendBtn.disabled = false;
+    confirmAppendBtn.textContent = "完成";
   }
 });
 
@@ -661,11 +687,10 @@ function renderRecordsActionChips(){
 function renderRecordsTable(){
   let rows = Array.isArray(importedRows) ? [...importedRows] : [];
 
-  // 改用狀態值
   if (recFilterPart)   rows = rows.filter(r => r["部位"] === recFilterPart);
   if (recFilterAction) rows = rows.filter(r => r["動作"] === recFilterAction);
 
-  // 最新在上（你的日期是 YYYY/MM/DD，可直接比較）
+  // 排序：新的在前
   rows.sort((a,b)=> (a["日期"] < b["日期"] ? 1 : (a["日期"] > b["日期"] ? -1 : 0)));
 
   recordsTbody.innerHTML = "";
@@ -677,7 +702,12 @@ function renderRecordsTable(){
       if (k.startsWith("重")){
         const kg = Number(r[k])||0;
         const lb = kgToNearestLbStep(kg);
-        td.textContent = `${kg} kg (${lb} lb)`;     // 顯示 kg + lb
+        td.textContent = `${kg} kg (${lb} lb)`;
+      } else if (k === "日期") {
+        // ★ 修正：顯示處理過的 _dateStr (ex: 2026/01/24)
+        // 如果沒有 _dateStr，為了保險起見切掉 T 後面的字
+        const clean = r._dateStr || (r["日期"]||"").split("T")[0];
+        td.textContent = clean;
       } else {
         td.textContent = r[k] ?? "";
       }
@@ -685,9 +715,6 @@ function renderRecordsTable(){
     });
     recordsTbody.appendChild(tr);
   });
-
-  // 同步右側日曆（若有）
-  renderCalendar();
 }
 
 
@@ -703,9 +730,13 @@ function partDotClass(partZh){
 function renderCalendar(){
   const rows = [...importedRows];
 
-  const dStr = r._dateStr; 
-  if (!dStr) return;
-  (partsByDate[dStr] = partsByDate[dStr] || new Set()).add(r["部位"]);
+  // 依日期聚合 (使用 _dateStr)
+  const partsByDate = {};
+  rows.forEach(r=>{
+    const dStr = r._dateStr || (r["日期"]||"").split("T")[0].replace(/-/g, '/');
+    if (!dStr) return;
+    (partsByDate[dStr] = partsByDate[dStr] || new Set()).add(r["部位"]);
+  });
 
   const y = calendarDate.getFullYear();
   const m = calendarDate.getMonth();
@@ -723,30 +754,32 @@ function renderCalendar(){
     if (dayNum > 0 && dayNum <= daysInMonth){
       const dateStr = ymd(new Date(y, m, dayNum));
       cell.append(el("div","d", String(dayNum)));
+      
       const badges = el("div","badges");
       const parts = Array.from(partsByDate[dateStr] || []);
       parts.forEach(p=>{
         const dotCls = partDotClass(p);
         const b = el("div","badge");
         const dot = el("span",`dot ${dotCls}`);
-        const t = el("span","", p);
-        b.append(dot,t);
+        b.append(dot); // 這裡只要圓點就好，不顯示文字比較整齊
         badges.append(b);
       });
       cell.append(badges);
 
-      // 點擊：選取日期並渲染右側詳情
       cell.addEventListener("click", ()=>{
         selectedCalDate = dateStr;
-        renderCalendar();          // 先重畫自己，做高亮
-        renderCalendarDetails();   // 再畫右側
+        renderCalendar();
+        renderCalendarDetails();
       });
 
-      // 高亮目前選到的日期
       if (selectedCalDate === dateStr) cell.classList.add("selected");
     }
     calendarGrid.append(cell);
   }
+  
+  // 確保日曆詳情也能篩選正確
+  renderCalendarDetails();
+}
 
   // 若第一次進來沒有選日期，預設選今天（若本月有今天）
   const todayStr = ymd(new Date());
@@ -763,6 +796,7 @@ function renderCalendarDetails(){
   }
   calSideTitle.textContent = selectedCalDate;
 
+  // ★ 修正：用 _dateStr 比對
   const rows = (importedRows || []).filter(r => r._dateStr === selectedCalDate);
 
   if (rows.length === 0){
@@ -774,21 +808,18 @@ function renderCalendarDetails(){
 
   rows.forEach(r=>{
     const li = el("li","side-item");
-
-    // 標題列：部位 · 動作
     const top = el("div","si-top");
     top.append(el("span","", `${r["部位"]} · ${r["動作"]}`));
     li.append(top);
 
-    // 明細列：每一組一行
     const detail = el("div","si-sub");
     const reps = [r["組1"], r["組2"], r["組3"], r["組4"]].map(n => Number(n)||0);
     const wkg  = [r["重1"], r["重2"], r["重3"], r["重4"]].map(n => Number(n)||0);
-    const wlb  = wkg.map(kg => kgToNearestLbStep(kg));
-
+    
     for (let i=0;i<4;i++){
       if (reps[i] || wkg[i]){
-        const line = el("div","si-line", `${reps[i]} 下  @  ${wlb[i]} lb (${wkg[i]} kg)`);
+        const lb = kgToNearestLbStep(wkg[i]);
+        const line = el("div","si-line", `${reps[i]} 下  @  ${lb} lb (${wkg[i]} kg)`);
         detail.append(line);
       }
     }
@@ -808,9 +839,15 @@ tabs.forEach(btn=>{
     btn.classList.add("active");
     const tab = btn.dataset.tab;
     Object.values(pages).forEach(p=>p.classList.remove("show"));
-    pages[tab].classList.add("show");
+    
+    // 如果頁面存在就顯示 (main, calendar, records)
+    if(pages[tab]) pages[tab].classList.add("show");
+    // 設定頁要特別抓一下 (因為是一開始不再 pages 列表裡的)
+    if(tab === "settings") document.getElementById("page-settings")?.classList.add("show");
+
     if (tab === "calendar") { renderCalendarWeekdays(); renderCalendar(); }
     if (tab === "records")  { renderRecordsTable(); }
+    if (tab === "settings") { renderEditor(); } // ★ 渲染編輯器
   });
 });
 
@@ -956,3 +993,113 @@ tabs.forEach(btn => {
   renderRecordsTable();
   renderMain();
 })();
+
+// ====== Settings Editor Logic (新增在檔案最下方) ======
+const editorContainer = document.getElementById("editor-container");
+const saveCatalogBtn = document.getElementById("saveCatalogBtn");
+
+function renderEditor(){
+  editorContainer.innerHTML = "";
+  
+  Object.entries(CATALOG).forEach(([key, val]) => {
+    const box = el("div", "edit-group");
+    
+    // 標題與刪除部位按鈕
+    const head = el("div", "eg-head");
+    head.innerHTML = `<strong>${val.label}</strong> <span style="font-size:0.8em;opacity:0.6">(${key})</span>`;
+    
+    const delPartBtn = el("button", "btn btn-danger btn-sm", "刪除部位");
+    delPartBtn.onclick = () => {
+      if(confirm(`確定刪除「${val.label}」及其所有動作？`)) {
+        delete CATALOG[key];
+        renderEditor();
+      }
+    };
+    head.appendChild(delPartBtn);
+    box.appendChild(head);
+
+    // 動作列表
+    const ul = el("ul", "eg-list");
+    val.exercises.forEach((ex, idx) => {
+      const li = el("li", "eg-item");
+      li.innerHTML = `<span>${ex}</span>`;
+      const delExBtn = el("button", "btn btn-danger btn-sm", "×");
+      delExBtn.onclick = () => {
+        val.exercises.splice(idx, 1);
+        renderEditor();
+      };
+      li.appendChild(delExBtn);
+      ul.appendChild(li);
+    });
+    box.appendChild(ul);
+
+    // 新增動作
+    const addRow = el("div", "eg-add-row");
+    const input = el("input", "eg-input");
+    input.placeholder = "輸入新動作...";
+    const addBtn = el("button", "btn btn-primary btn-sm", "新增");
+    
+    const doAdd = () => {
+      if(input.value.trim()){
+        val.exercises.push(input.value.trim());
+        renderEditor();
+      }
+    };
+    addBtn.onclick = doAdd;
+    input.onkeydown = (e) => { if(e.key==="Enter") doAdd(); };
+
+    addRow.append(input, addBtn);
+    box.appendChild(addRow);
+    
+    editorContainer.appendChild(box);
+  });
+
+  // 最下方：新增全新部位
+  const newPartBox = el("div", "edit-group new-part-box");
+  newPartBox.innerHTML = `<div class="eg-head"><strong>＋ 新增一個部位類別</strong></div>`;
+  const npRow = el("div", "eg-add-row");
+  
+  const keyInput = el("input", "eg-input"); keyInput.placeholder = "ID (英文,如 legs)";
+  const labelInput = el("input", "eg-input"); labelInput.placeholder = "顯示名稱 (如 臀腿)";
+  const npBtn = el("button", "btn btn-primary btn-sm", "新增");
+  
+  npBtn.onclick = () => {
+    const k = keyInput.value.trim();
+    const l = labelInput.value.trim();
+    if(k && l){
+      if(CATALOG[k]) { alert("這個 ID 已經存在了"); return; }
+      CATALOG[k] = { label: l, exercises: [] };
+      renderEditor();
+    } else {
+      alert("請輸入 ID (英文) 與 顯示名稱");
+    }
+  };
+  npRow.append(keyInput, labelInput, npBtn);
+  newPartBox.appendChild(npRow);
+  editorContainer.appendChild(newPartBox);
+}
+
+// 綁定設定頁儲存按鈕
+saveCatalogBtn?.addEventListener("click", async () => {
+  saveCatalogBtn.disabled = true;
+  saveCatalogBtn.textContent = "儲存中...";
+  try {
+    const r = await fetch(API_BASE, {
+      method: "POST",
+      body: JSON.stringify({ type: "config", catalog: CATALOG }), 
+    });
+    const j = await r.json();
+    if(j.ok) {
+      alert("設定已儲存！");
+      renderBottomNav();
+      renderActionNav();
+    } else {
+      alert("儲存失敗：" + j.error);
+    }
+  } catch(e) {
+    alert("連線錯誤");
+    console.error(e);
+  }
+  saveCatalogBtn.disabled = false;
+  saveCatalogBtn.textContent = "儲存變更到雲端";
+});

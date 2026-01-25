@@ -253,3 +253,30 @@ body {
   color: white; padding: 6px 10px; border-radius: 6px; flex: 1;
 }
 .new-part-box { border-style: dashed; }
+
+/* 1. 隱藏轉盤的 -1 佔位符 */
+.opt.spacer {
+  visibility: hidden;
+}
+
+/* 2. 美化匯出視窗 (Export Panel) - 替換原本的 .export-card */
+.export-card {
+  background: rgba(30, 30, 40, 0.9); /* 深色背景 */
+  backdrop-filter: blur(15px);       /* 毛玻璃特效 */
+  width: 90%;
+  max-width: 500px;
+  border-radius: var(--radius);
+  overflow: hidden;
+  border: 1px solid var(--border-glass);
+  box-shadow: 0 20px 50px rgba(0,0,0,0.8);
+  color: #fff;
+  animation: fadeIn 0.3s ease;
+}
+
+/* 3. 匯出表格的樣式微調 */
+.export-table th { background: rgba(255,255,255,0.1); color: var(--accent); }
+.export-table td { border-color: rgba(255,255,255,0.1); }
+.export-head h3 { font-size: 1.2rem; color: #fff; }
+
+/* 4. 解決主頁卡片重疊或跑版問題：確保卡片間距 */
+.block { margin-bottom: 30px; }
