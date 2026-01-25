@@ -15,6 +15,7 @@
     <button class="tab-btn active" data-tab="main">主頁</button>
     <button class="tab-btn" data-tab="calendar">日曆</button>
     <button class="tab-btn" data-tab="records">紀錄</button>
+    <button class="tab-btn" data-tab="settings">設定</button>
   </div>
 
   <!-- 主頁 -->
@@ -52,6 +53,22 @@
         <div class="side-title" id="calSideTitle">選擇日期查看詳情</div>
         <ul class="side-list" id="calSideList"></ul>
       </aside>
+    </div>
+  </section>
+
+  <section id="page-settings" class="page">
+    <div class="block">
+      <div class="summary">
+        <span class="hname">編輯動作庫</span>
+      </div>
+      <div class="text">在此新增或刪除部位與動作，記得按儲存。</div>
+
+      <div id="editor-container" class="editor-wrap">
+        </div>
+
+      <div class="actions" style="margin-top: 20px; justify-content: flex-end;">
+        <button id="saveCatalogBtn" class="btn btn-primary">儲存變更到雲端</button>
+      </div>
     </div>
   </section>
 

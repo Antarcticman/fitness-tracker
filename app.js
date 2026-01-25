@@ -1,50 +1,7 @@
-// ====== Catalog（依你提供的影片動作） ======
-const CATALOG = {
-  chest: {
-    label: "胸",
-    exercises: ["啞鈴臥推", "啞鈴上斜臥推", "啞鈴下斜臥推", "啞鈴飛鳥"],
-  },
-  back: {
-    label: "背",
-    exercises: ["俯身划船", "單臂划船", "上斜划船", "(輔)仰臥直臂上拉"],
-  },
-  legs: {
-    label: "臀腿",
-    exercises: [
-      "高腳杯深蹲",
-      "啞鈴硬拉",
-      "啞鈴直腿硬拉",
-      "保加利亞單腿蹲",
-      "啞鈴臀橋",
-      "(輔)啞鈴單腿提踵",
-    ],
-  },
-  shoulder: {
-    label: "肩",
-    exercises: [
-      "啞鈴推舉",
-      "阿諾德推舉",
-      "啞鈴側平舉",
-      "俯身啞鈴側平舉",
-      "(輔)啞鈴過頂前平舉",
-    ],
-  },
-  biceps: {
-    label: "肱二頭",
-    exercises: ["啞鈴彎舉", "上斜啞鈴彎舉", "啞鈴斜托彎舉", "集中彎舉"],
-  },
-  triceps: {
-    label: "肱三頭",
-    exercises: ["頸後啞鈴臂屈伸", "俯身臂屈伸", "鑽石啞鈴臥推"],
-  },
-  forearm: {
-    label: "前臂",
-    exercises: ["啞鈴錘式彎舉", "背後腕彎舉"],
-  },
-  core: {
-    label: "核心",
-    exercises: ["負重卷腹", "啞鈴傳遞", "抱石"],
-  },
+// ====== Catalog (現在改成從後端讀取) ======
+// 預設值 (萬一後端掛掉時的備案)
+let CATALOG = {
+  chest: { label: "胸", exercises: ["啞鈴臥推"] }
 };
 
 const MAX_SETS = 4; // 每動作最多四組
@@ -247,11 +204,38 @@ function timecodeToSeconds(tc){
 const API_BASE = "https://script.google.com/macros/s/AKfycbwy1VKGICqMwjax01HpCvYChWOuJW0H448qP9bSzJ--v9yYD8wbYrCR9aT5vYkjLBlYow/exec";
 
 async function apiLoadRows(){
-  // GAS 的 doGet 預設就是 GET 請求
   const r = await fetch(API_BASE);
   const j = await r.json();
   if (!j.ok) throw new Error(j.error || "load failed");
-  return j.rows || [];
+  
+  // 更新設定 (Config)
+  if (j.catalog && Object.keys(j.catalog).length > 0) {
+    CATALOG = j.catalog;
+    renderBottomNav();
+    renderActionNav();
+  }
+
+  let rows = j.rows || [];
+
+  // ★ 這裡加入 7 點前算前一天的邏輯 ★
+  return rows.map(row => {
+    // 1. 先把 Google Sheet 的 ISO 字串轉回 JS Date 時間物件
+    const d = new Date(row["日期"]);
+    
+    // 2. 複製一份時間，用來計算「歸類日期」
+    const logicalDate = new Date(d);
+    
+    // 3. 如果「小時」小於 7，就讓這份歸類日期「倒退一天」
+    if (logicalDate.getHours() < 7) {
+      logicalDate.setDate(logicalDate.getDate() - 1);
+    }
+    
+    // 4. 產生給日曆用的 _dateStr (例如 2026/01/24)
+    // 這樣就算你是 1/25 凌晨 2 點練，日曆也會拿到 1/24 的字串
+    row._dateStr = ymd(logicalDate);
+    
+    return row;
+  });
 }
 
 async function apiAppendRows(rows){
@@ -531,8 +515,8 @@ function blockToRow(b, dateStr){
     "重1":wts[0],"重2":wts[1],"重3":wts[2],"重4":wts[3] };
 }
 function collectTodayRows(){
-  const today = ymdWithCutoff(new Date(), 7); // 07:00 前算前一天
-  return blocks.filter(b=>b.sets.length>0).map(b=>blockToRow(b, today));
+  const nowISO = new Date().toISOString(); 
+  return blocks.filter(b=>b.sets.length>0).map(b=>blockToRow(b, nowISO));
 }
 function fillExportTable(rows){
   exportTbody.innerHTML = "";
@@ -719,12 +703,9 @@ function partDotClass(partZh){
 function renderCalendar(){
   const rows = [...importedRows];
 
-  // 依日期聚合當天做過的部位集合
-  const partsByDate = {};
-  rows.forEach(r=>{
-    const d = r["日期"]; if (!d) return;
-    (partsByDate[d] = partsByDate[d] || new Set()).add(r["部位"]);
-  });
+  const dStr = r._dateStr; 
+  if (!dStr) return;
+  (partsByDate[dStr] = partsByDate[dStr] || new Set()).add(r["部位"]);
 
   const y = calendarDate.getFullYear();
   const m = calendarDate.getMonth();
@@ -782,7 +763,7 @@ function renderCalendarDetails(){
   }
   calSideTitle.textContent = selectedCalDate;
 
-  const rows = (importedRows || []).filter(r => r["日期"] === selectedCalDate);
+  const rows = (importedRows || []).filter(r => r._dateStr === selectedCalDate);
 
   if (rows.length === 0){
     const li = el("li","side-item");
@@ -831,6 +812,129 @@ tabs.forEach(btn=>{
     if (tab === "calendar") { renderCalendarWeekdays(); renderCalendar(); }
     if (tab === "records")  { renderRecordsTable(); }
   });
+});
+
+// ====== Settings Editor Logic ======
+const editorContainer = document.getElementById("editor-container");
+const saveCatalogBtn = document.getElementById("saveCatalogBtn");
+
+function renderEditor(){
+  editorContainer.innerHTML = "";
+  
+  Object.entries(CATALOG).forEach(([key, val]) => {
+    const box = el("div", "edit-group");
+    
+    // 部位標題列
+    const head = el("div", "eg-head");
+    head.innerHTML = `<strong>${val.label}</strong> <span style="font-size:0.8em;color:#888">(${key})</span>`;
+    
+    const delPartBtn = el("button", "btn btn-danger btn-sm", "刪除部位");
+    delPartBtn.onclick = () => {
+      if(confirm(`確定刪除 ${val.label} 及其所有動作？`)) {
+        delete CATALOG[key];
+        renderEditor();
+      }
+    };
+    head.appendChild(delPartBtn);
+    box.appendChild(head);
+
+    // 動作列表
+    const ul = el("ul", "eg-list");
+    val.exercises.forEach((ex, idx) => {
+      const li = el("li", "eg-item");
+      li.innerHTML = `<span>${ex}</span>`;
+      const delExBtn = el("button", "btn btn-danger btn-sm", "×");
+      delExBtn.onclick = () => {
+        val.exercises.splice(idx, 1);
+        renderEditor();
+      };
+      li.appendChild(delExBtn);
+      ul.appendChild(li);
+    });
+    box.appendChild(ul);
+
+    // 新增動作輸入框
+    const addRow = el("div", "eg-add-row");
+    const input = el("input", "eg-input");
+    input.placeholder = "新動作名稱...";
+    const addBtn = el("button", "btn btn-primary btn-sm", "新增動作");
+    
+    const doAdd = () => {
+      if(input.value.trim()){
+        val.exercises.push(input.value.trim());
+        renderEditor();
+      }
+    };
+    addBtn.onclick = doAdd;
+    // 讓按 Enter 也能新增
+    input.onkeydown = (e) => { if(e.key==="Enter") doAdd(); };
+
+    addRow.append(input, addBtn);
+    box.appendChild(addRow);
+    
+    editorContainer.appendChild(box);
+  });
+
+  // 最下方：新增全新部位
+  const newPartBox = el("div", "edit-group new-part-box");
+  newPartBox.innerHTML = `<div class="eg-head"><strong>新增部位</strong></div>`;
+  const npRow = el("div", "eg-add-row");
+  
+  const keyInput = el("input", "eg-input"); keyInput.placeholder = "ID (如 legs)";
+  const labelInput = el("input", "eg-input"); labelInput.placeholder = "顯示名稱 (如 臀腿)";
+  const npBtn = el("button", "btn btn-primary btn-sm", "新增");
+  
+  npBtn.onclick = () => {
+    const k = keyInput.value.trim();
+    const l = labelInput.value.trim();
+    if(k && l){
+      if(CATALOG[k]) { alert("ID 已存在"); return; }
+      CATALOG[k] = { label: l, exercises: [] };
+      renderEditor();
+    } else {
+      alert("請輸入 ID 與 名稱");
+    }
+  };
+  npRow.append(keyInput, labelInput, npBtn);
+  newPartBox.appendChild(npRow);
+  editorContainer.appendChild(newPartBox);
+}
+
+// 綁定儲存按鈕
+saveCatalogBtn?.addEventListener("click", async () => {
+  saveCatalogBtn.disabled = true;
+  saveCatalogBtn.textContent = "儲存中...";
+  try {
+    // 呼叫 GAS，注意這裡 type: "config"
+    const r = await fetch(API_BASE, {
+      method: "POST",
+      body: JSON.stringify({ type: "config", catalog: CATALOG }), 
+    });
+    const j = await r.json();
+    if(j.ok) {
+      alert("設定已儲存！");
+      // 更新介面
+      renderBottomNav();
+      renderActionNav();
+    } else {
+      alert("儲存失敗：" + j.error);
+    }
+  } catch(e) {
+    alert("連線錯誤");
+    console.error(e);
+  }
+  saveCatalogBtn.disabled = false;
+  saveCatalogBtn.textContent = "儲存變更到雲端";
+});
+
+// 切換到 settings tab 時觸發渲染
+tabs.forEach(btn => {
+    btn.addEventListener("click", () => {
+        // ... (原有的 code)
+        if (btn.dataset.tab === "settings") {
+            renderEditor();
+        }
+    });
 });
 
 // ====== Init ======
