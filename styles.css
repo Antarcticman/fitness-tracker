@@ -1,0 +1,472 @@
+:root{
+  --bg: #020617;
+  --card: rgba(15,23,42,0.92);
+  --border: rgba(148,163,184,0.35);
+  --text: #fff;
+  --muted: rgba(248,250,252,.7);
+  --accent: #2563eb;
+  --danger: #fecdd3;
+  --danger-text: #7f1d1d;
+  --chip-w: 120px;
+}
+
+*{ box-sizing: border-box; }
+html, body { height: 100%; }
+body{
+  margin: 0;
+  color: var(--text);
+  background:
+    radial-gradient(1000px 600px at 15% 0%, #1f2937 0%, transparent 55%),
+    radial-gradient(900px 520px at 85% 0%, #020617 0%, transparent 55%),
+    var(--bg);
+  font-family: ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Noto Sans TC",Arial;
+}
+
+.hidden{ display: none !important; }
+
+/* ===================== 基本區塊 ===================== */
+.page{
+  padding: 60px 20px 20px;  /* 原本是 20px，頂端多留一塊給 tab */
+  display: none;
+}
+.page.show{ display: block; }
+.container{ max-width:1100px; margin:0 auto; padding:20px 16px; }
+
+/* ===================== 頂部分頁（永遠顯示） ===================== */
+/* 頂部分頁（永遠顯示） */
+.top-tabs{
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 1000;
+  display: flex;
+  gap: 8px;
+  padding: 8px 12px;
+  background: rgba(0,0,0,.55);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--border);
+}
+.tab-btn{
+  background: rgba(255,255,255,.08);
+  border: 1px solid var(--border);
+  color: #fff;
+  font-weight: 900;
+  border-radius: 12px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+.tab-btn.active{ background: #fff; color:#0f172a; }
+
+/* ===================== 主頁框架 ===================== */
+.app{
+  max-width:1100px; margin:0 auto;
+  padding:20px 16px 190px;
+  display:grid; gap:16px;
+}
+.block{ display:grid; gap:16px; grid-template-columns:1fr; }
+@media (min-width:960px){
+  .block{ grid-template-columns:1fr 360px; }
+  .block .right{ position:sticky; top:20px; height:fit-content; }
+}
+.card{
+  background:
+    radial-gradient(circle at top left, rgba(148,163,184,0.16), transparent 55%)
+    var(--card);
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  padding: 16px 18px;
+  backdrop-filter: blur(12px);
+  box-shadow: 0 18px 45px rgba(15,23,42,.75);
+  transition:
+    transform .15s ease,
+    box-shadow .15s ease,
+    border-color .15s ease,
+    background .2s ease;
+}
+.card:hover{
+  transform: translateY(-2px);
+  box-shadow: 0 24px 60px rgba(15,23,42,.9);
+  border-color: rgba(248,250,252,.35);
+}
+
+.title{ color:var(--muted); font-size:14px; margin-bottom:8px; }
+
+/* 左側抬頭（合併 summary / head-row） */
+.summary{
+  display:flex; align-items:center; justify-content:space-between; gap:12px;
+  background: transparent; border:none; box-shadow:none; padding:0; margin:0 0 6px;
+}
+.tag{
+  background:#fff; color:#0f172a; border-radius:999px;
+  font-size:14px; padding:4px 8px; font-weight:900;
+}
+.hname{ font-weight:900; font-size:14px; margin-left:10px; }
+.summary .text{ text-align:left; font-weight:800; }
+
+/* 動作區右側按鈕 */
+.actions{ display:flex; gap:8px; }
+.btn{
+  border:none;
+  border-radius:16px;
+  padding:10px 16px;
+  font-weight:900;
+  cursor:pointer;
+  box-shadow:0 8px 18px rgba(0,0,0,.25);
+  transition:
+    background .15s ease,
+    color .15s ease,
+    transform .12s ease,
+    box-shadow .15s ease,
+    opacity .15s ease;
+}
+
+.tab-btn,
+.nav-btn,
+.action-chip,
+.chip{
+  transition:
+    background .15s ease,
+    color .15s ease,
+    transform .12s ease,
+    box-shadow .15s ease,
+    border-color .15s ease;
+}
+
+.tab-btn:hover,
+.nav-btn:hover,
+.action-chip:hover,
+.chip:hover{
+  transform: translateY(-1px);
+  box-shadow: 0 10px 22px rgba(15,23,42,.7);
+}
+.btn-primary{ background:#fff; color:#0f172a; }
+.btn-danger{ background:var(--danger); color:var(--danger-text); }
+.btn[disabled]{ opacity:.45; cursor:not-allowed; }
+.btn-sm{ padding:6px 10px; border-radius:12px; font-weight:800; }
+
+/* 右側：組紀錄（最多四組） */
+.set-list{ list-style:none; margin:0; padding:0; display:grid; gap:8px; }
+.set-item{
+  display:grid; grid-template-columns:72px 1fr; align-items:center; gap:10px;
+  background: rgba(255,255,255,.06);
+  border:1px solid var(--border);
+  border-radius:14px; padding:8px 10px; cursor:pointer;
+}
+.set-item.active{ outline:2px solid #fff; }
+.badge{ background:#fff; color:#0f172a; border-radius:999px; text-align:center; font-weight:900; padding:6px 0; }
+.sline{ font-weight:800; }
+.hint{ color:var(--muted); font-size:12px; text-align:center; margin-top:6px; }
+.disabled{ opacity:.55; pointer-events:auto; }
+.set-item.ghost{ opacity:.5; border-style:dashed; }
+.set-item.ghost.active{ opacity:.7; }
+
+/* 下：部位列 */
+.bottom-nav{
+  position:fixed; left:0; right:0; bottom:0;
+  padding:8px;
+  backdrop-filter: blur(8px);
+  border-top: 1px solid var(--border);
+  z-index: 900;
+}
+#bottomNav{
+  width:100%;
+  display:grid;
+  grid-template-columns:repeat(4,1fr);
+  gap:8px;
+}
+@media (min-width:760px){
+  #bottomNav{
+    grid-template-columns:repeat(8,1fr);
+  }
+}
+.nav-btn{
+  background: rgba(255,255,255,.08);
+  border:1px solid var(--border);
+  border-radius:12px; padding:10px 12px;
+  font-weight:900; color:#fff; cursor:pointer;
+}
+.nav-btn.active{ background:#fff; color:#0f172a; }
+
+/* 上：動作列（依部位） */
+.action-nav-wrap{
+  position:fixed; left:0; right:0; bottom:62px;
+  pointer-events:none; z-index: 920;
+}
+.action-nav{
+  pointer-events:auto;
+  width:100%;
+  display:flex;
+  gap:8px;
+  overflow-x:auto;
+  padding:0 12px;
+}
+.action-chip{
+  flex:0 0 auto;
+  min-width:var(--chip-w);
+  text-align:center;
+  padding:10px 12px;
+  border-radius:14px;
+  background: rgba(255,255,255,.08);  /* ← 只有按鈕本身有底色 */
+  border:1px solid var(--border);
+  font-weight:800;
+  cursor:pointer;
+  color:#fff;
+  white-space:nowrap;
+}
+.action-chip.active{ background:#fff; color:#0f172a; }
+
+/* 右下：完成/清除 */
+.finish-btn{ position:fixed; right:14px; bottom:168px; z-index:930; }
+.clear-btn { position:fixed; right:14px; bottom:120px; z-index:930; }
+
+/* ===================== 完成面板 ===================== */
+.export-panel{
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0,0,0,.60);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:16px;
+}
+
+.export-card{
+  width:min(960px,96vw);
+  max-height:90vh;
+  display:flex;
+  flex-direction:column;
+  background: var(--card);
+  border:1px solid var(--border);
+  border-radius:18px;
+  backdrop-filter: blur(16px);
+  box-shadow:0 24px 70px rgba(0,0,0,.7);
+  padding:14px 16px;
+}
+
+.export-head{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+  margin-bottom:8px;
+}
+.export-head h3{ margin:0; font-size:18px; }
+
+.export-body{
+  flex:1 1 auto;
+  min-height:0;
+}
+
+.export-table-wrap{
+  height:100%;
+  max-height:none;
+  overflow:auto;
+  border:1px solid var(--border);
+  border-radius:12px;
+}
+
+.export-table{
+  width:100%;
+  border-collapse:collapse;
+}
+.export-table th,
+.export-table td{
+  padding:8px 10px;
+  border-bottom:1px solid var(--border);
+  text-align:center;
+}
+.export-table thead th{
+  position:sticky;
+  top:0;
+  background: rgba(0,0,0,.35);
+}
+
+.export-actions{
+  flex-shrink:0;
+  display:flex;
+  gap:8px;
+  justify-content:flex-end;
+  margin-top:10px;
+}
+/* ===================== 日曆頁 ===================== */
+.cal-layout{ display:grid; grid-template-columns: 1fr 320px; gap:16px; }
+.cal-left{ min-width:0; z-index: 1000; }
+@media (max-width: 900px){ .cal-layout{ grid-template-columns:1fr; } }
+
+.cal-header{
+  display:flex; align-items:center; justify-content:center;
+  gap:12px; padding:8px 0; white-space:nowrap;
+}
+.cal-nav{
+  inline-size:32px; block-size:32px;
+  font-size:22px;
+  display:grid; place-items:center;
+  border:1px solid var(--border);
+  border-radius:8px; background:transparent; cursor:pointer;
+  color: #fff;
+}
+.cal-month{ font-weight:700; letter-spacing:.5px; font-size:22px; }
+
+.calendar-weekdays{
+  display:grid; grid-template-columns:repeat(7,1fr);
+  gap:6px; margin-bottom:4px; color:#fff; font-weight:800; text-align:center;
+}
+.calendar-grid{ display:grid; grid-template-columns:repeat(7,1fr); gap:6px; }
+.day{
+  border-radius: 12px;
+  min-height: 84px;
+  padding: 6px 8px;
+  border: 1px solid rgba(255,255,255,.18);
+  background: rgba(255,255,255,.06);   /* 和 chip 一樣半透明 */
+  cursor: pointer;
+  transition:
+    transform .12s ease,
+    box-shadow .12s ease,
+    background .15s ease,
+    border-color .15s ease;
+}
+
+.day .d{
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* hover 時浮起來一點 */
+.day:hover{
+  background: rgba(255,255,255,.10);
+  border-color: rgba(255,255,255,.4);
+  box-shadow: 0 10px 24px rgba(15,23,42,.9);
+  transform: translateY(-1px);
+}
+
+/* 被選到的那天：固定像 hover 狀態但更明顯一點 */
+.day.selected{
+  background: rgba(15,23,42,.96);
+  border-color: rgba(248,250,252,.7);
+  box-shadow: 0 14px 32px rgba(15,23,42,1);
+  transform: translateY(-2px);
+}
+
+.badges{ display:flex; flex-wrap:wrap; gap:4px; margin-top:4px; }
+.dot{ display:inline-block; width:10px; height:10px; border-radius:999px; margin-right:4px; }
+.badge{ display:inline-flex; align-items:center; gap:6px; background:rgba(255,255,255,.1); border:1px solid var(--border); border-radius:10px; padding:2px 6px; font-size:12px; color:#fff; }
+.dot-chest{background:#fca5a5}.dot-back{background:#93c5fd}.dot-legs{background:#86efac}.dot-shoulder{background:#fde68a}
+.dot-biceps{background:#c4b5fd}.dot-triceps{background:#fdba74}.dot-core{background:#a7f3d0}.dot-cardio{background:#f9a8d4}
+
+/* 日曆右側明細（副行改為換行） */
+.cal-side{
+  background: var(--card);
+  border:1px solid var(--border);
+  border-radius:12px; padding:12px;
+  backdrop-filter: blur(8px);
+}
+.side-title{ font-weight:600; margin-bottom:8px; }
+.side-list{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:8px; }
+.side-item{ border:1px solid var(--border); border-radius:10px; padding:8px 10px; }
+.si-top{ display:flex; justify-content:space-between; font-weight:600; margin-bottom:6px; }
+.si-sub{ display:block; margin-top:2px; opacity:.9; white-space:normal; }
+
+/* ===================== 紀錄頁 ===================== */
+.records-filters{ padding:10px 50px; margin-bottom:12px; display:flex; flex-direction:column; gap:10px; z-index:1000 ; }
+.rf-row{
+  display: flex;
+  align-items: flex-start;   /* label 對齊 chip 上緣 */
+  gap: 8px;
+  flex-wrap: wrap;
+  min-height: 40px;          /* 不管有沒有按鈕，這列高度都一樣 */
+}
+
+.rf-label{
+  opacity: .85;
+  min-width: 3rem;
+  padding-top: 4px;          /* 視覺上置中一點 */
+}
+
+.chip-row{
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-height: 32px;          /* 沒有 chip 也先佔一點高度 */
+}
+
+.chip{
+  display:inline-flex; align-items:center; padding:8px 12px; margin:4px;
+  border-radius:999px; border:1px solid rgba(255,255,255,.18);
+  background: rgba(255,255,255,.06); color:#fff; cursor:pointer;
+  font-size:.95rem; transition:transform .1s ease, background .2s ease, border-color .2s ease;
+  z-index: 1000;
+}
+.chip.active{ background: var(--accent); border-color: var(--accent); }
+
+.table-wrap{ width:100%; }
+.records-table{
+  width: 95%; margin: 0 auto;      /* ← 置中 */
+  border: 1px solid var(--border);
+  border-radius: 22px;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+  backdrop-filter: blur(6px);
+  box-shadow: 0 10px 30px rgba(0,0,0,.35);
+}
+.records-table th, .records-table td{
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(255,255,255,.07);
+  text-align: center;
+}
+.records-table thead th{ background: rgba(0,0,0,.35); position:sticky; top:0; }
+.records-table tbody tr:nth-child(odd){ background: rgba(255,255,255,.02); }
+.records-table td.num{ text-align:right; width:80px; white-space:nowrap; }
+
+/* ===================== 轉盤式選擇器 ===================== */
+.picker-row{
+  display:flex; align-items:center; justify-content:center;
+  gap:16px; margin:8px 0;
+}
+.picker{ display:flex; gap:20px; align-items:center; justify-content:center; }
+.picker .col{ display:flex; flex-direction:column; align-items:center; }
+.picker .lab2{ font-size:12px; color:var(--muted); margin-top:6px; }
+
+.picker-actions{ display:flex; flex-direction:column; gap:10px; margin-left:8px; }
+.picker-actions .btn{ min-width:140px; }
+
+.wheel{
+  position:relative; height:140px; width:120px; overflow-y:auto;
+  scroll-snap-type: y mandatory;
+  border-radius:12px; border:1px solid var(--border);
+  background: rgba(255,255,255,.02);
+  scrollbar-width:none; -ms-overflow-style:none;
+}
+.wheel::-webkit-scrollbar{ display:none; }
+.wheel .opt{
+  height:44px; display:flex; align-items:center; justify-content:center;
+  font-size:20px; font-weight:800; color:rgba(255,255,255,.7); scroll-snap-align:center; user-select:none;
+}
+.wheel .opt.spacer{ visibility:hidden; }
+.wheel .opt.active{ color:#fff; }
+.wheel::after{
+  content:""; position:sticky; top:calc(50% - 22px);
+  display:block; height:44px; margin:0 6px;
+  border-top:2px solid rgba(255,255,255,.15);
+  border-bottom:2px solid rgba(255,255,255,.15);
+  pointer-events:none;
+}
+
+/* ============ 預留 ReactBits 動畫的掛載點（之後用） ============ */
+/* .fx-electric-border {}  // 之後在需要的位置加上此 class 配合 JS 效果 */
+/* .fx-click-spark    {}  // click spark 可掛在按鈕/卡片 */
+
+#fx-root{
+  position:fixed;
+  inset:0;
+  pointer-events:none;
+  z-index:0;
+}
+
+/* 只負責調整 z-index，不再強制所有元素 position:relative */
+body > *:not(#fx-root):not(.export-panel){
+  z-index:1;
+}
+
+
