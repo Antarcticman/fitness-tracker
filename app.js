@@ -1,7 +1,6 @@
-// ====== Catalog (現在改成從後端讀取) ======
-// 預設值 (萬一後端掛掉時的備案)
+// ====== Catalog (預設值，實際會從後端讀取) ======
 let CATALOG = {
-  chest: { label: "胸", exercises: ["啞鈴臥推"] }
+  chest: { label: "胸", exercises: ["啞鈴臥推"] } 
 };
 
 const MAX_SETS = 4; // 每動作最多四組
@@ -10,6 +9,7 @@ const MAX_SETS = 4; // 每動作最多四組
 let currentPart = "chest";
 const blocks = []; // [{id, part, actionIdx, ended, temp:{reps,weight}, sets:[{reps,weight}], activeSetIdx}]
 let idCounter = 1;
+let importedRows = []; // 儲存從後端抓回來的資料
 
 // ====== DOM ======
 // Main
@@ -28,23 +28,25 @@ const exportTbody       = document.getElementById("exportTableBody");
 const closeExportBtn    = document.getElementById("closeExportBtn");
 const confirmAppendBtn  = document.getElementById("confirmAppendBtn");
 
+// Settings Editor DOM
+const editorContainer = document.getElementById("editor-container");
+const saveCatalogBtn = document.getElementById("saveCatalogBtn");
+
 // Tabs & Pages
 const tabs = [...document.querySelectorAll(".tab-btn")];
 const pages = {
   main: document.getElementById("page-main"),
   calendar: document.getElementById("page-calendar"),
   records: document.getElementById("page-records"),
+  settings: document.getElementById("page-settings") // 確保這裡抓得到
 };
 
 // Records page
-const recordsPartChips   = document.getElementById("recordsPartChips");
-const recordsActionChips = document.getElementById("recordsActionChips");
 const recordsPartRow   = document.getElementById("recordsPartChips");
 const recordsActionRow = document.getElementById("recordsActionChips");
+const recordsTbody   = document.getElementById("recordsTbody");
 let recFilterPart = "";   // 儲存 chips 選擇
 let recFilterAction = "";
-
-const recordsTbody   = document.getElementById("recordsTbody");
 
 // Calendar page
 const calendarWeekdays = document.getElementById("calendarWeekdays");
@@ -57,14 +59,6 @@ let calendarDate = new Date();
 // ====== Helpers ======
 const el = (tag, cls, text) => { const E = document.createElement(tag); if (cls) E.className = cls; if (text!=null) E.textContent = text; return E; };
 const ymd = (d) => `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,"0")}/${String(d.getDate()).padStart(2,"0")}`;
-// 07:00 之前都算「前一天」
-const ymdWithCutoff = (d, cutoffHour=7)=>{
-  const dd = new Date(d);
-  if (dd.getHours() < cutoffHour){
-    dd.setDate(dd.getDate() - 1);
-  }
-  return `${dd.getFullYear()}/${String(dd.getMonth()+1).padStart(2,"0")}/${String(dd.getDate()).padStart(2,"0")}`;
-};
 
 const fmtSetLine = s => {
   const kg = Number(s.weight)||0;
@@ -72,53 +66,43 @@ const fmtSetLine = s => {
   return `${lb} lb (${kg} kg) · ${s.reps} 下`;
 };
 
-// ===== 轉盤工具（讓首尾也能置中） =====
+// ===== 轉盤工具 =====
 function rangeArray(min, max, step=1){
   const out = [];
   for (let v=min; v<=max; v+=step) out.push(v);
   return out;
 }
 
-const ITEM_H = 44;     // 與 CSS .opt 高度一致
-const WHEEL_H = 140;   // 與 CSS .wheel 高度一致
-const SPACER_COUNT = 1; // 頂/底各 1 個 spacer
+const ITEM_H = 44;     
+const WHEEL_H = 140;   
+const SPACER_COUNT = 1; 
 
 // === 單位設定 ===
-const LB_STEP = 2.5;       // 2.5 磅一格
-const LB_MAX  = 60;       // 你可依啞鈴上限調整（例如 52.5、80、100）
+const LB_STEP = 2.5;       
+const LB_MAX  = 60;       
 const KG_PER_LB = 0.45359237;
 
 // 換算
 const lbToKg = (lb)=> lb * KG_PER_LB;
 const kgToLb = (kg)=> kg / KG_PER_LB;
 
-// 以「公斤」→ 轉成「最接近的磅(以 2.5 為步進)」
 function kgToNearestLbStep(kg){
-  const KG_PER_LB = 0.45359237;
-  const LB_STEP = 2.5;
   const lb = kg / KG_PER_LB;
   return Math.round(lb / LB_STEP) * LB_STEP;
 }
 
-
 /**
- * 建立輪盤內容到 elem：
- * - 頂/底各加入隱藏 spacer，讓第一/最後值可置中
- * - values: 數值陣列，如 [0..30] 或 [1..20]
- * - initialValue: 初始選中值
- * - onChange: (val:number) => void
+ * 建立輪盤內容
  */
 function buildWheel(elem, values, initialValue, onChange){
   elem.innerHTML = "";
 
-  // 頂部 spacer
   for (let i=0;i<SPACER_COUNT;i++){
     const sp = document.createElement("div");
     sp.className = "opt spacer";
     sp.textContent = "-1";
     elem.appendChild(sp);
   }
-  // 真實選項
   values.forEach(v=>{
     const d = document.createElement("div");
     d.className = "opt";
@@ -126,7 +110,6 @@ function buildWheel(elem, values, initialValue, onChange){
     d.textContent = v;
     elem.appendChild(d);
   });
-  // 底部 spacer
   for (let i=0;i<SPACER_COUNT;i++){
     const sp = document.createElement("div");
     sp.className = "opt spacer";
@@ -152,7 +135,6 @@ function buildWheel(elem, values, initialValue, onChange){
     highlightAndEmit(realIdx);
   };
 
-  // 捲動後吸附為最近一格
   let timer = null;
   elem.addEventListener("scroll", ()=>{
     clearTimeout(timer);
@@ -165,7 +147,6 @@ function buildWheel(elem, values, initialValue, onChange){
     }, 80);
   });
 
-  // 點選即吸附
   elem.addEventListener("click",(e)=>{
     const opt = e.target.closest(".opt");
     if (!opt) return;
@@ -176,7 +157,6 @@ function buildWheel(elem, values, initialValue, onChange){
     scrollToRealIdx(realIdx);
   });
 
-  // 初始化定位
   const initRealIdx = Math.max(0, values.indexOf(initialValue));
   setTimeout(()=> {
     const childIdx = initRealIdx + SPACER_COUNT;
@@ -186,21 +166,7 @@ function buildWheel(elem, values, initialValue, onChange){
   }, 0);
 }
 
-function timecodeToSeconds(tc){
-  if (!tc) return 0;
-  const parts = tc.split(":").map(x=>parseInt(x,10)||0);
-  if (parts.length === 3){
-    const [a,b,c] = parts;
-    if (a < 60) return a*60 + b; // 視為 mm:ss:00
-    return a*3600 + b*60 + c;
-  }
-  if (parts.length === 2){ const [m,s]=parts; return m*60 + s; }
-  return parts[0] || 0;
-}
-
-// ====== 與後端互動（Google Sheets via Apps Script） ======
-
-// 請將下方的網址換成你在第一階段最後複製的那串 Web App URL
+// ====== 與後端互動 (Apps Script) ======
 const API_BASE = "https://script.google.com/macros/s/AKfycbwy1VKGICqMwjax01HpCvYChWOuJW0H448qP9bSzJ--v9yYD8wbYrCR9aT5vYkjLBlYow/exec";
 
 async function apiLoadRows(){
@@ -208,44 +174,28 @@ async function apiLoadRows(){
   const j = await r.json();
   if (!j.ok) throw new Error(j.error || "load failed");
   
-  // 1. 如果後端有回傳 catalog 設定，就更新本地變數
   if (j.catalog && Object.keys(j.catalog).length > 0) {
     CATALOG = j.catalog;
-    // 因為動作列表變了，重畫導覽列
-    renderBottomNav();
-    renderActionNav();
+    // 這裡不直接呼叫 render，避免初始載入時重複渲染
   }
 
   const rows = j.rows || [];
 
-  // 2. 處理每一筆資料的日期 (修復日曆顯示 + 7點前算前一天)
   return rows.map(row => {
-    // 原始 row["日期"] 可能是 ISO (2026-01-25T02:00...)
     const d = new Date(row["日期"]);
-    
-    // 複製一份時間來算「歸類日期」
     const logicalDate = new Date(d);
-    
-    // ★ 關鍵：如果小於早上 7 點，算前一天
     if (logicalDate.getHours() < 7) {
       logicalDate.setDate(logicalDate.getDate() - 1);
     }
-    
-    // 加上 _dateStr 屬性 (例如 "2026/01/24") 給日曆用
     row._dateStr = ymd(logicalDate);
-    
     return row;
   });
 }
 
 async function apiAppendRows(rows){
-  // 傳送資料到 GAS 的 doPost
-  // 注意：CORS 跨域請求在 GAS 上很嚴格，這裡用 "text/plain" 避開 Preflight check
-  // 雖然我們送的是 JSON 字串，但告訴瀏覽器這是純文字，GAS 那邊再 JSON.parse
   const r = await fetch(API_BASE, {
     method: "POST",
     body: JSON.stringify({ rows: rows }), 
-    // 不設定 header，或者設為 text/plain，這是連線 GAS 的標準做法
   });
   
   const j = await r.json();
@@ -253,19 +203,19 @@ async function apiAppendRows(rows){
   return j.appended || 0;
 }
 
-// 這裡不需要改，保持原樣即可
 async function reloadFromBackend(){
   importedRows = await apiLoadRows();
   renderRecordsFilters(importedRows);
   renderRecordsTable();
+  renderBottomNav(); // 確保 Catalog 更新後重繪導覽
+  renderActionNav();
 }
 
-// 從 importedRows 找相同【部位＋動作】的最後一筆，抓最後非 0 的(重,次)；找不到→ {0,10}
 function getLastDefaultsFromCsv(partZh, actionName){
   if (!Array.isArray(importedRows) || importedRows.length === 0) return { weight:0, reps:10 };
   const rows = importedRows.filter(r => r["部位"] === partZh && r["動作"] === actionName);
   if (!rows.length) return { weight:0, reps:10 };
-  rows.sort((a,b)=> (a["日期"] > b["日期"] ? 1 : -1)); // 假設 YYYY/MM/DD
+  rows.sort((a,b)=> (a["日期"] > b["日期"] ? 1 : -1)); 
   const last = rows[rows.length - 1];
   for (let i = 4; i >= 1; i--){
     const reps = Number(last[`組${i}`] || 0);
@@ -275,7 +225,7 @@ function getLastDefaultsFromCsv(partZh, actionName){
   return { weight:0, reps:10 };
 }
 
-// ====== Main Page：Blocks ======
+// ====== Main Page Logic ======
 function createBlock(part = currentPart, actionIdx = 0){
   const b = { id:idCounter++, part, actionIdx, ended:false, temp:{reps:10, weight:0}, sets:[], activeSetIdx:null };
   blocks.push(b);
@@ -299,17 +249,18 @@ function renderMain(){
 function renderBlock(b){
   const wrap = el("section","block" + (b.ended ? " disabled" : ""));
   const left = el("div","left card");
-  left.append(el("div")); // 你的 title 如果要可保留
+  left.append(el("div")); 
 
-  // 先準備右側需要用到的變數（避免 TDZ）
   let listWrap; 
   let hint;
 
-  // ---- 抬頭 + 目前資訊 + 右側按鈕 ----
   const head = el("div","summary");
   const headLeft = el("div");
-  const tag = el("span","tag", CATALOG[b.part].label);
-  const hname = el("span","hname", CATALOG[b.part].exercises[b.actionIdx] || "");
+  // 防呆：如果 CATALOG 裡沒這個 key，就給個預設顯示
+  const catData = CATALOG[b.part] || { label: b.part, exercises: [] };
+  
+  const tag = el("span","tag", catData.label);
+  const hname = el("span","hname", catData.exercises[b.actionIdx] || "");
   const sText = el("div","text");
 
   const headRight = el("div","actions");
@@ -321,31 +272,26 @@ function renderBlock(b){
   head.append(headLeft, sText, headRight);
   left.append(head);
 
-  // 轉盤區（建立再呼叫）
   const pickerWrap = el("div","picker");
-  // 重量（左）
   const colW = el("div","col");
   colW.append(el("div","lab","重量"));
-  const wheelW = el("div","wheel");      // ← 先建立
+  const wheelW = el("div","wheel");      
   colW.append(wheelW, el("div","lab2","lb"));
-  // 幾下（右）
   const colR = el("div","col");
   colR.append(el("div","lab","幾下"));
-  const wheelR = el("div","wheel");      // ← 先建立
+  const wheelR = el("div","wheel");      
   colR.append(wheelR, el("div","lab2","下"));
 
   pickerWrap.append(colW, colR);
   left.append(pickerWrap);
 
-  // ===== 右側（先建立，讓下面函式可以安全引用 listWrap）=====
   const right = el("div","right card");
   right.append(el("div","title","本動作紀錄（最多 4 組）"));
-  listWrap = el("ul","set-list");   // ← 這裡賦值
+  listWrap = el("ul","set-list");   
   right.append(listWrap);
   hint = el("div","hint");
   right.append(hint);
 
-  // ===== 下面才宣告會用到 listWrap 的函式 =====
   const updateSummary = ()=>{
     if (b.ended){ sText.textContent=""; return; }
     const src  = (b.activeSetIdx===null) ? b.temp : b.sets[b.activeSetIdx];
@@ -357,8 +303,7 @@ function renderBlock(b){
       : `${lb} lb (${kg} kg) · ${src.reps} 下 · 第 ${idx} 組`;
   };
 
-  // ...（建立 wheelW / wheelR 容器）...
-  function rebuildWheels(){                          // ← 先宣告
+  function rebuildWheels(){                          
     const editingExisting = b.activeSetIdx !== null;
     const src = editingExisting ? b.sets[b.activeSetIdx] : b.temp;
     const lbValues = []; for (let lb=0; lb<=LB_MAX; lb+=LB_STEP) lbValues.push(lb);
@@ -376,7 +321,7 @@ function renderBlock(b){
       updateSummary(); renderSetList(listWrap, b);
     });
   }
-  rebuildWheels();                                   // ← 再呼叫
+  rebuildWheels();                                   
 
   function refreshButtons(){
     const onlyOnGhost = (b.activeSetIdx === null);
@@ -431,7 +376,6 @@ function renderBlock(b){
   refreshButtons();
   renderSetList(listWrap, b);
 
-  // 右下按鈕行為（維持你的原本邏輯）
   nextBtn.addEventListener("click", ()=>{
     if (b.ended) return;
     if (b.sets.length >= MAX_SETS) return;
@@ -449,8 +393,8 @@ function renderBlock(b){
     updateSummary();
     createBlock(currentPart, 0);
     const nb = getActiveBlock();
-    const partZh = CATALOG[nb.part].label;
-    const name   = CATALOG[nb.part].exercises[nb.actionIdx] || "";
+    const partZh = CATALOG[nb.part]?.label || nb.part;
+    const name   = CATALOG[nb.part]?.exercises[nb.actionIdx] || "";
     const last   = getLastDefaultsFromCsv(partZh, name);
     nb.temp = { reps:last.reps, weight:last.weight };
     renderMain();
@@ -460,7 +404,6 @@ function renderBlock(b){
   return wrap;
 }
 
-// 下方「部位」列
 function renderBottomNav(){
   bottomNav.innerHTML = "";
   Object.entries(CATALOG).forEach(([k,v])=>{
@@ -469,25 +412,20 @@ function renderBottomNav(){
       currentPart = k;
       
       const b = getActiveBlock();
-      // ★ 修正邏輯：如果當前卡片已經有做幾組了，就結束它，開新的
-      // 如果當前卡片是空的，就直接切換它的部位
       if(b.sets.length > 0) {
         b.ended = true;
-        // 強制更新上一張卡片的狀態顯示
         const allBlocks = document.querySelectorAll('.block');
         const lastBlockNode = allBlocks[allBlocks.length-1];
         if(lastBlockNode) lastBlockNode.classList.add('disabled');
-        
         createBlock(currentPart, 0);
       } else {
         b.part = currentPart;
         b.actionIdx = 0;
       }
 
-      // 帶入該部位的第一個動作與預設重量
       const nb = getActiveBlock();
-      const partZh = CATALOG[nb.part].label;
-      const name   = CATALOG[nb.part].exercises[nb.actionIdx] || "";
+      const partZh = CATALOG[nb.part]?.label || nb.part;
+      const name   = CATALOG[nb.part]?.exercises[nb.actionIdx] || "";
       const last   = getLastDefaultsFromCsv(partZh, name);
       nb.temp = { reps:last.reps, weight:last.weight };
       
@@ -498,18 +436,20 @@ function renderBottomNav(){
   });
 }
 
-// 上方「動作」列
 function renderActionNav(){
   actionNav.innerHTML = "";
-  const list = CATALOG[currentPart].exercises;
+  const catData = CATALOG[currentPart];
+  if(!catData) return; // 防呆
+
+  const list = catData.exercises;
   const activeBlock = getActiveBlock();
+  
   list.forEach((name, i)=>{
     const chip = el("div","action-chip"+(i===activeBlock.actionIdx?" active":""), name);
     chip.addEventListener("click",()=>{
       const b = getActiveBlock();
       b.part = currentPart;
       b.actionIdx = i;
-      // 帶入 CSV 預設
       const partZh = CATALOG[b.part].label;
       const nm   = CATALOG[b.part].exercises[b.actionIdx] || "";
       const last = getLastDefaultsFromCsv(partZh, nm);
@@ -520,10 +460,10 @@ function renderActionNav(){
   });
 }
 
-// ====== 匯出 / 寫入 Excel ======
+// ====== Export / Write to Excel ======
 function blockToRow(b, dateStr){
-  const part = CATALOG[b.part].label;
-  const action = CATALOG[b.part].exercises[b.actionIdx] || "";
+  const part = CATALOG[b.part]?.label || b.part;
+  const action = CATALOG[b.part]?.exercises[b.actionIdx] || "";
   const reps = [0,0,0,0], wts = [0,0,0,0];
   b.sets.slice(0,4).forEach((s,i)=>{ reps[i]=s.reps||0; wts[i]=s.weight||0; });
   return { "日期":dateStr,"部位":part,"動作":action,
@@ -531,9 +471,7 @@ function blockToRow(b, dateStr){
     "重1":wts[0],"重2":wts[1],"重3":wts[2],"重4":wts[3] };
 }
 function collectTodayRows(){
-  // 寫入當下最精確的 ISO 時間 (包含分秒)
-  // 這樣後續才能計算休息時間
-  const nowISO = new Date().toISOString();
+  const nowISO = new Date().toISOString(); 
   return blocks.filter(b=>b.sets.length>0).map(b=>blockToRow(b, nowISO));
 }
 function fillExportTable(rows){
@@ -548,13 +486,11 @@ function fillExportTable(rows){
 }
 
 function resetMainFromCsv(){
-  // 清掉所有 block
   blocks.length = 0;
-  // 建一個新的 active block
   createBlock(currentPart, 0);
   const b = getActiveBlock();
-  const partZh = CATALOG[b.part].label;
-  const name   = CATALOG[b.part].exercises[b.actionIdx] || "";
+  const partZh = CATALOG[b.part]?.label || b.part;
+  const name   = CATALOG[b.part]?.exercises[b.actionIdx] || "";
   const last   = getLastDefaultsFromCsv(partZh, name);
   b.temp = { reps: last.reps, weight: last.weight };
   renderMain();
@@ -578,12 +514,11 @@ confirmAppendBtn?.addEventListener("click", async ()=>{
 
     const appended = await apiAppendRows(rows); 
     
-    await reloadFromBackend(); // 同步後端資料
+    await reloadFromBackend(); 
 
     exportPanel.classList.add("hidden");
     resetMainFromCsv();
 
-    // 跳轉到紀錄頁
     tabs.forEach(t => t.classList.remove("active"));
     document.querySelector('.tab-btn[data-tab="records"]')?.classList.add("active");
     
@@ -596,7 +531,6 @@ confirmAppendBtn?.addEventListener("click", async ()=>{
 
   }catch(e){
     console.error(e);
-    // 溫和的錯誤提示
     alert("同步發生異常 (若 Google Sheet 已有資料請忽略)。\n" + e.message);
   } finally {
     confirmAppendBtn.disabled = false;
@@ -606,30 +540,20 @@ confirmAppendBtn?.addEventListener("click", async ()=>{
 
 clearAll?.addEventListener("click", resetMainFromCsv);
 
-// ====== Records：篩選與表格 ======
-function unique(arr){ return [...new Set(arr)]; }
-
-function buildActionOptionsForPart(partZh){
-  let rows = importedRows || [];
-  if (partZh) rows = rows.filter(r => r["部位"] === partZh);
-  const actions = unique(rows.map(r => r["動作"]).filter(Boolean));
-}
-
+// ====== Records Filter ======
 function renderRecordsFilters(rows){
   renderRecordsPartChips(rows);
   renderRecordsActionChips(rows);
 }
 
-// 產生「部位」chips
 function renderRecordsPartChips(){
   const parts = [...new Set((importedRows||[]).map(r=>r["部位"]).filter(Boolean))];
   recordsPartRow.innerHTML = "";
 
-  // 全部部位按鈕
   const allBtn = el("button","chip"+(recFilterPart===""?" active":""),"全部部位");
   allBtn.addEventListener("click", ()=>{
     recFilterPart = "";
-    recFilterAction = "";           // 清空動作
+    recFilterAction = "";       
     renderRecordsPartChips();
     renderRecordsActionChips();
     renderRecordsTable();
@@ -640,7 +564,7 @@ function renderRecordsPartChips(){
     const btn = el("button","chip"+(recFilterPart===p?" active":""), p);
     btn.addEventListener("click", ()=>{
       recFilterPart = p;
-      recFilterAction = "";         // 切部位時清空動作
+      recFilterAction = "";    
       renderRecordsPartChips();
       renderRecordsActionChips();
       renderRecordsTable();
@@ -649,7 +573,6 @@ function renderRecordsPartChips(){
   });
 }
 
-// 產生「動作」chips（依目前部位）
 function renderRecordsActionChips(){
   recordsActionRow.innerHTML = "";
   let pool = (importedRows||[]);
@@ -657,14 +580,12 @@ function renderRecordsActionChips(){
 
   const actions = [...new Set(pool.map(r=>r["動作"]).filter(Boolean))];
 
-  // 若未選部位，提示
   if (!recFilterPart){
     const tip = el("div","muted","請先選擇上方的部位");
     recordsActionRow.append(tip);
     return;
   }
 
-  // 全部動作
   const allBtn = el("button","chip"+(recFilterAction===""?" active":""),"全部動作");
   allBtn.addEventListener("click", ()=>{
     recFilterAction = "";
@@ -690,7 +611,6 @@ function renderRecordsTable(){
   if (recFilterPart)   rows = rows.filter(r => r["部位"] === recFilterPart);
   if (recFilterAction) rows = rows.filter(r => r["動作"] === recFilterAction);
 
-  // 排序：新的在前
   rows.sort((a,b)=> (a["日期"] < b["日期"] ? 1 : (a["日期"] > b["日期"] ? -1 : 0)));
 
   recordsTbody.innerHTML = "";
@@ -704,9 +624,8 @@ function renderRecordsTable(){
         const lb = kgToNearestLbStep(kg);
         td.textContent = `${kg} kg (${lb} lb)`;
       } else if (k === "日期") {
-        // ★ 修正：顯示處理過的 _dateStr (ex: 2026/01/24)
-        // 如果沒有 _dateStr，為了保險起見切掉 T 後面的字
-        const clean = r._dateStr || (r["日期"]||"").split("T")[0];
+        const raw = r["日期"] || "";
+        const clean = r._dateStr || raw.split("T")[0];
         td.textContent = clean;
       } else {
         td.textContent = r[k] ?? "";
@@ -730,19 +649,19 @@ function partDotClass(partZh){
 function renderCalendar(){
   const rows = [...importedRows];
 
-  // 依日期聚合 (使用 _dateStr)
   const partsByDate = {};
   rows.forEach(r=>{
-    const dStr = r._dateStr || (r["日期"]||"").split("T")[0].replace(/-/g, '/');
+    const raw = r["日期"] || "";
+    const dStr = r._dateStr || raw.split("T")[0].replace(/-/g, '/');
     if (!dStr) return;
     (partsByDate[dStr] = partsByDate[dStr] || new Set()).add(r["部位"]);
   });
 
   const y = calendarDate.getFullYear();
   const m = calendarDate.getMonth();
+  const daysInMonth = new Date(y, m+1, 0).getDate();
   const first = new Date(y, m, 1);
   const startDow = first.getDay();
-  const daysInMonth = new Date(y, m+1, 0).getDate();
 
   monthLabel.textContent = `${y}/${String(m+1).padStart(2,"0")}`;
   calendarGrid.innerHTML = "";
@@ -761,7 +680,7 @@ function renderCalendar(){
         const dotCls = partDotClass(p);
         const b = el("div","badge");
         const dot = el("span",`dot ${dotCls}`);
-        b.append(dot); // 這裡只要圓點就好，不顯示文字比較整齊
+        b.append(dot); 
         badges.append(b);
       });
       cell.append(badges);
@@ -777,17 +696,9 @@ function renderCalendar(){
     calendarGrid.append(cell);
   }
   
-  // 確保日曆詳情也能篩選正確
   renderCalendarDetails();
 }
 
-  // 若第一次進來沒有選日期，預設選今天（若本月有今天）
-  const todayStr = ymd(new Date());
-  if (!selectedCalDate && todayStr.startsWith(`${y}/${String(m+1).padStart(2,"0")}`)){
-    selectedCalDate = todayStr;
-    renderCalendar(); // 只會跑一次
-  }
-}
 function renderCalendarDetails(){
   calSideList.innerHTML = "";
   if (!selectedCalDate){
@@ -796,7 +707,6 @@ function renderCalendarDetails(){
   }
   calSideTitle.textContent = selectedCalDate;
 
-  // ★ 修正：用 _dateStr 比對
   const rows = (importedRows || []).filter(r => r._dateStr === selectedCalDate);
 
   if (rows.length === 0){
@@ -828,177 +738,12 @@ function renderCalendarDetails(){
   });
 }
 
-
 prevMonthBtn?.addEventListener("click", ()=>{ calendarDate = new Date(calendarDate.getFullYear(), calendarDate.getMonth()-1, 1); renderCalendar(); });
 nextMonthBtn?.addEventListener("click", ()=>{ calendarDate = new Date(calendarDate.getFullYear(), calendarDate.getMonth()+1, 1); renderCalendar(); });
 
-// ====== Tabs ======
-tabs.forEach(btn=>{
-  btn.addEventListener("click", ()=>{
-    tabs.forEach(b=>b.classList.remove("active"));
-    btn.classList.add("active");
-    const tab = btn.dataset.tab;
-    Object.values(pages).forEach(p=>p.classList.remove("show"));
-    
-    // 如果頁面存在就顯示 (main, calendar, records)
-    if(pages[tab]) pages[tab].classList.add("show");
-    // 設定頁要特別抓一下 (因為是一開始不再 pages 列表裡的)
-    if(tab === "settings") document.getElementById("page-settings")?.classList.add("show");
-
-    if (tab === "calendar") { renderCalendarWeekdays(); renderCalendar(); }
-    if (tab === "records")  { renderRecordsTable(); }
-    if (tab === "settings") { renderEditor(); } // ★ 渲染編輯器
-  });
-});
-
 // ====== Settings Editor Logic ======
-const editorContainer = document.getElementById("editor-container");
-const saveCatalogBtn = document.getElementById("saveCatalogBtn");
-
 function renderEditor(){
-  editorContainer.innerHTML = "";
-  
-  Object.entries(CATALOG).forEach(([key, val]) => {
-    const box = el("div", "edit-group");
-    
-    // 部位標題列
-    const head = el("div", "eg-head");
-    head.innerHTML = `<strong>${val.label}</strong> <span style="font-size:0.8em;color:#888">(${key})</span>`;
-    
-    const delPartBtn = el("button", "btn btn-danger btn-sm", "刪除部位");
-    delPartBtn.onclick = () => {
-      if(confirm(`確定刪除 ${val.label} 及其所有動作？`)) {
-        delete CATALOG[key];
-        renderEditor();
-      }
-    };
-    head.appendChild(delPartBtn);
-    box.appendChild(head);
-
-    // 動作列表
-    const ul = el("ul", "eg-list");
-    val.exercises.forEach((ex, idx) => {
-      const li = el("li", "eg-item");
-      li.innerHTML = `<span>${ex}</span>`;
-      const delExBtn = el("button", "btn btn-danger btn-sm", "×");
-      delExBtn.onclick = () => {
-        val.exercises.splice(idx, 1);
-        renderEditor();
-      };
-      li.appendChild(delExBtn);
-      ul.appendChild(li);
-    });
-    box.appendChild(ul);
-
-    // 新增動作輸入框
-    const addRow = el("div", "eg-add-row");
-    const input = el("input", "eg-input");
-    input.placeholder = "新動作名稱...";
-    const addBtn = el("button", "btn btn-primary btn-sm", "新增動作");
-    
-    const doAdd = () => {
-      if(input.value.trim()){
-        val.exercises.push(input.value.trim());
-        renderEditor();
-      }
-    };
-    addBtn.onclick = doAdd;
-    // 讓按 Enter 也能新增
-    input.onkeydown = (e) => { if(e.key==="Enter") doAdd(); };
-
-    addRow.append(input, addBtn);
-    box.appendChild(addRow);
-    
-    editorContainer.appendChild(box);
-  });
-
-  // 最下方：新增全新部位
-  const newPartBox = el("div", "edit-group new-part-box");
-  newPartBox.innerHTML = `<div class="eg-head"><strong>新增部位</strong></div>`;
-  const npRow = el("div", "eg-add-row");
-  
-  const keyInput = el("input", "eg-input"); keyInput.placeholder = "ID (如 legs)";
-  const labelInput = el("input", "eg-input"); labelInput.placeholder = "顯示名稱 (如 臀腿)";
-  const npBtn = el("button", "btn btn-primary btn-sm", "新增");
-  
-  npBtn.onclick = () => {
-    const k = keyInput.value.trim();
-    const l = labelInput.value.trim();
-    if(k && l){
-      if(CATALOG[k]) { alert("ID 已存在"); return; }
-      CATALOG[k] = { label: l, exercises: [] };
-      renderEditor();
-    } else {
-      alert("請輸入 ID 與 名稱");
-    }
-  };
-  npRow.append(keyInput, labelInput, npBtn);
-  newPartBox.appendChild(npRow);
-  editorContainer.appendChild(newPartBox);
-}
-
-// 綁定儲存按鈕
-saveCatalogBtn?.addEventListener("click", async () => {
-  saveCatalogBtn.disabled = true;
-  saveCatalogBtn.textContent = "儲存中...";
-  try {
-    // 呼叫 GAS，注意這裡 type: "config"
-    const r = await fetch(API_BASE, {
-      method: "POST",
-      body: JSON.stringify({ type: "config", catalog: CATALOG }), 
-    });
-    const j = await r.json();
-    if(j.ok) {
-      alert("設定已儲存！");
-      // 更新介面
-      renderBottomNav();
-      renderActionNav();
-    } else {
-      alert("儲存失敗：" + j.error);
-    }
-  } catch(e) {
-    alert("連線錯誤");
-    console.error(e);
-  }
-  saveCatalogBtn.disabled = false;
-  saveCatalogBtn.textContent = "儲存變更到雲端";
-});
-
-// 切換到 settings tab 時觸發渲染
-tabs.forEach(btn => {
-    btn.addEventListener("click", () => {
-        // ... (原有的 code)
-        if (btn.dataset.tab === "settings") {
-            renderEditor();
-        }
-    });
-});
-
-// ====== Init ======
-(async function init(){
-  try { await reloadFromBackend(); } catch(e){ console.warn("尚未啟動後端或 Excel 檔尚未建立", e); }
-  renderCalendarWeekdays();
-
-  createBlock(currentPart, 0);
-  // 第一塊帶入上次紀錄
-  const b = getActiveBlock();
-  const partZh = CATALOG[b.part].label;
-  const name   = CATALOG[b.part].exercises[b.actionIdx] || "";
-  const last   = getLastDefaultsFromCsv(partZh, name);
-  b.temp = { reps:last.reps, weight:last.weight };
-
-  await reloadFromBackend();
-  renderRecordsPartChips();
-  renderRecordsActionChips();
-  renderRecordsTable();
-  renderMain();
-})();
-
-// ====== Settings Editor Logic (新增在檔案最下方) ======
-const editorContainer = document.getElementById("editor-container");
-const saveCatalogBtn = document.getElementById("saveCatalogBtn");
-
-function renderEditor(){
+  if(!editorContainer) return;
   editorContainer.innerHTML = "";
   
   Object.entries(CATALOG).forEach(([key, val]) => {
@@ -1103,3 +848,45 @@ saveCatalogBtn?.addEventListener("click", async () => {
   saveCatalogBtn.disabled = false;
   saveCatalogBtn.textContent = "儲存變更到雲端";
 });
+
+
+// ====== Tabs Switching ======
+tabs.forEach(btn=>{
+  btn.addEventListener("click", ()=>{
+    tabs.forEach(b=>b.classList.remove("active"));
+    btn.classList.add("active");
+    const tab = btn.dataset.tab;
+    Object.values(pages).forEach(p=>p?.classList.remove("show"));
+    
+    if(pages[tab]) pages[tab].classList.add("show");
+    
+    // 如果是設定頁，確保 container 顯示
+    if(tab === "settings") {
+      document.getElementById("page-settings")?.classList.add("show");
+      renderEditor();
+    }
+
+    if (tab === "calendar") { renderCalendarWeekdays(); renderCalendar(); }
+    if (tab === "records")  { renderRecordsTable(); }
+  });
+});
+
+// ====== Init ======
+(async function init(){
+  try { await reloadFromBackend(); } catch(e){ console.warn("尚未啟動後端或 Excel 檔尚未建立", e); }
+  renderCalendarWeekdays();
+
+  createBlock(currentPart, 0);
+  // 第一塊帶入上次紀錄
+  const b = getActiveBlock();
+  const partZh = CATALOG[b.part]?.label || b.part;
+  const name   = CATALOG[b.part]?.exercises[b.actionIdx] || "";
+  const last   = getLastDefaultsFromCsv(partZh, name);
+  b.temp = { reps:last.reps, weight:last.weight };
+
+  await reloadFromBackend();
+  renderRecordsPartChips();
+  renderRecordsActionChips();
+  renderRecordsTable();
+  renderMain();
+})();
