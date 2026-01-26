@@ -3,7 +3,7 @@ let CATALOG = {
   chest: { label: "胸", exercises: ["啞鈴臥推"] } 
 };
 
-const MAX_SETS = 4; // 每動作最多四組
+const MAX_SETS = 4; 
 
 // ====== 狀態 ======
 let currentPart = null; 
@@ -11,6 +11,7 @@ let currentActionIdx = null;
 const blocks = []; 
 let idCounter = 1;
 let GLOBAL_LAST_END_TIME = null; 
+let SESSION_START_TIME = null; 
 let importedRows = []; 
 let myChart = null;
 let chartUnit = "kg"; 
@@ -80,27 +81,54 @@ function fmtDuration(ms){
   return `${m}:${String(s).padStart(2,'0')}`;
 }
 
-// ====== 全域計時器 ======
+function fmtHours(ms){
+  if(!ms || ms<0) return "0分";
+  const totalMin = Math.round(ms/60000);
+  const h = Math.floor(totalMin/60);
+  const m = totalMin % 60;
+  if(h>0) return `${h}小時 ${m}分`;
+  return `${m}分鐘`;
+}
+
+// ====== 全域計時器 & 狀態監控 ======
 setInterval(() => {
   const activeB = blocks.find(b => b.isWorking && !b.ended);
+  
+  // 1. 更新卡片上的計時器 (工作)
   if (activeB && activeB.currentSetStart) {
-    const el = document.getElementById(`timer-${activeB.id}`);
+    const el = document.getElementById(`header-timer-${activeB.id}`);
     if (el) {
       const diff = Date.now() - activeB.currentSetStart;
-      el.textContent = fmtDuration(diff);
+      el.textContent = `⏱️ ${fmtDuration(diff)}`;
     }
   }
+
+  // 2. 更新全域背景狀態
+  if (activeB) document.body.classList.add("working-mode");
+  else document.body.classList.remove("working-mode");
+
+  // 3. 更新休息計時器
+  blocks.forEach(b => {
+    if (!b.ended && !b.isWorking) {
+        let refTime = b.lastSetEnd || (b.sets.length === 0 ? GLOBAL_LAST_END_TIME : null);
+        if (refTime) {
+            const el = document.getElementById(`header-timer-${b.id}`);
+            if (el) {
+                const diff = Date.now() - refTime;
+                el.textContent = `☕ ${fmtDuration(diff)}`;
+                el.className = "header-timer resting"; 
+            }
+        }
+    }
+  });
 }, 500);
 
 // ===== 轉盤工具 =====
 function rangeArray(min, max, step=1){
-  const out = [];
-  for (let v=min; v<=max; v+=step) out.push(v);
-  return out;
+  const out = []; for (let v=min; v<=max; v+=step) out.push(v); return out;
 }
 
 const ITEM_H = 44;     
-const WHEEL_H = 132;   
 const SPACER_COUNT = 1; 
 const LB_STEP = 2.5;       
 const LB_MAX  = 60;       
@@ -243,7 +271,8 @@ function renderMain(){
 }
 
 function renderBlock(b){
-  const wrap = el("section","block" + (b.ended ? " disabled" : ""));
+  const blockCls = "block" + (b.ended ? " disabled" : "") + (b.isWorking ? " active-block" : "");
+  const wrap = el("section", blockCls);
   
   // Left
   const leftCol = el("div", "block-left-col");
@@ -256,25 +285,26 @@ function renderBlock(b){
   const hname = el("span","hname", catData.exercises[b.actionIdx] || "");
   headInfo.append(tag, hname);
 
-  // 右側刪除鈕
-  const headRight = el("div");
+  // Header Timer
+  const timerDiv = el("div", "header-timer");
+  timerDiv.id = `header-timer-${b.id}`;
+
+  const headRight = el("div", "head-right");
   if(b.ended){
-    // 結束時隱藏刪除鈕，避免跳動 (文字改在狀態欄顯示)
   } else {
     const delBlockBtn = el("button", "del-btn", "✕");
-    delBlockBtn.style.fontSize = "1.5rem";
     delBlockBtn.onclick = () => {
       if(confirm("確定要刪除這個動作紀錄嗎？")){
         const idx = blocks.indexOf(b);
         if(idx > -1) blocks.splice(idx, 1);
-        if(blocks.length === 0) { currentActionIdx = null; GLOBAL_LAST_END_TIME = null; }
+        if(blocks.length === 0) { currentActionIdx = null; GLOBAL_LAST_END_TIME = null; SESSION_START_TIME = null; }
         renderMain();
         renderActionNav();
       }
     };
     headRight.append(delBlockBtn);
   }
-  headTop.append(headInfo, headRight);
+  headTop.append(headInfo, timerDiv, headRight);
 
   const sText = el("div","text"); 
   head.append(headTop, sText);
@@ -294,7 +324,7 @@ function renderBlock(b){
 
   // Right
   const rightCol = el("div", "block-right-col");
-  rightCol.append(el("div","title","本動作紀錄")); // CSS會隱藏它
+  rightCol.append(el("div","title","本動作紀錄"));
   const listWrap = el("ul","set-list");   
   listWrap.style.flex = "1"; 
   const rightFooter = el("div", "right-col-footer");
@@ -303,16 +333,19 @@ function renderBlock(b){
   rightFooter.append(endBtn);
   rightCol.append(listWrap, rightFooter);
 
-  // Update logic
   const updateSummary = ()=>{
+    if(b.isWorking) timerDiv.className = "header-timer working";
+    else timerDiv.className = "header-timer resting";
+
     if (b.ended){ 
       sText.textContent = "✓ 此動作已完成"; 
       sText.style.color = "var(--text-muted)";
+      timerDiv.textContent = ""; 
       return; 
     }
     const idx = (b.activeSetIdx===null) ? (b.sets.length+1) : (b.activeSetIdx+1);
     if (b.isWorking) {
-        sText.innerHTML = `🔥 第 ${idx} 組進行中... <span id="timer-${b.id}" class="timer-text">0:00</span>`;
+        sText.textContent = `🔥 第 ${idx} 組進行中...`;
         sText.style.color = "#4ade80"; 
         actionBtn.textContent = "完成這一組";
         actionBtn.className = "btn btn-danger"; 
@@ -320,10 +353,19 @@ function renderBlock(b){
         const src = (b.activeSetIdx===null) ? b.temp : b.sets[b.activeSetIdx];
         const kg = Number(src.weight)||0;
         const lb = kgToNearestLbStep(kg);
+        
+        let refTime = b.lastSetEnd || (b.sets.length===0 ? GLOBAL_LAST_END_TIME : null);
+        if(refTime) {
+             const diff = Date.now() - refTime;
+             timerDiv.textContent = `☕ ${fmtDuration(diff)}`;
+        } else {
+             timerDiv.textContent = ""; 
+        }
+
         sText.textContent = (idx > MAX_SETS) ? "已完成四組訓練" : `準備：${lb} lb (${kg} kg) · ${src.reps} 下`;
         sText.style.color = "var(--accent)";
         actionBtn.textContent = (idx > MAX_SETS) ? "已完成四組" : "開始這一組";
-        actionBtn.className = "btn btn-primary"; 
+        actionBtn.className = "btn btn-start"; 
     }
   };
 
@@ -356,8 +398,6 @@ function renderBlock(b){
     if (b.ended) {
         actionBtn.style.display = "none";
         endBtn.disabled = true; endBtn.textContent = "已完成此動作"; endBtn.className = "btn"; endBtn.style.opacity = "0.5";
-        wheelW.style.opacity = "0.5"; wheelW.style.pointerEvents = "none";
-        wheelR.style.opacity = "0.5"; wheelR.style.pointerEvents = "none";
         return;
     }
     const full = b.sets.length >= MAX_SETS;
@@ -378,7 +418,6 @@ function renderBlock(b){
       
       const li = el("li","set-item"+(idx===bRef.activeSetIdx?" active":""));
       const infoDiv = el("div", "set-info");
-      
       let workTag = "";
       if (s.workTime) workTag = `<span class=\"work-tag\">⏱ ${fmtDuration(s.workTime)}</span>`;
 
@@ -389,13 +428,11 @@ function renderBlock(b){
             ${workTag}
         </div>
       `;
-      
       infoDiv.addEventListener("click", ()=>{
         if(bRef.isWorking) return; 
         bRef.activeSetIdx = idx;
         rebuildWheels(); updateSummary(); renderSetListInner(container, bRef); refreshButtons();
       });
-
       const delBtn = el("button", "del-btn", "✕");
       delBtn.addEventListener("click", (e)=>{
         e.stopPropagation();
@@ -409,6 +446,18 @@ function renderBlock(b){
       li.append(infoDiv, delBtn);
       container.append(li);
     });
+    
+    // Ghost Row
+    if(bRef.isWorking) {
+      const ghostLi = el("li", "set-item ghost");
+      ghostLi.innerHTML = `
+        <div class="set-info-row" style="justify-content:center; color:var(--accent-work);">
+           <span class="badge" style="background:var(--accent-work); color:#000;">進行中</span>
+           <span>數據調整中...</span>
+        </div>`;
+      container.append(ghostLi);
+      if(bRef.tempRestTime) container.insertBefore(el("div", "rest-separator", `休 ${fmtDuration(bRef.tempRestTime)}`), ghostLi);
+    }
   }
 
   renderSetListInner(listWrap, b);
@@ -418,28 +467,44 @@ function renderBlock(b){
   actionBtn.addEventListener("click", ()=>{
     if (b.ended) return;
     const now = Date.now();
+    if(!SESSION_START_TIME) SESSION_START_TIME = now;
+
     if (!b.isWorking) {
+        // === START ===
         b.isWorking = true; b.currentSetStart = now; 
         let lastEnd = GLOBAL_LAST_END_TIME; 
-        let rest = 0; if(lastEnd) rest = now - lastEnd; b.tempRestTime = rest;
-        wheelW.style.opacity = "0.5"; wheelW.style.pointerEvents = "none";
-        wheelR.style.opacity = "0.5"; wheelR.style.pointerEvents = "none";
-        updateSummary(); refreshButtons();
+        if(!lastEnd && b.sets.length===0) lastEnd = GLOBAL_LAST_END_TIME; 
+        
+        let rest = 0; if(lastEnd) rest = now - lastEnd; 
+        b.tempRestTime = rest;
+
+        // Force Immediate Update
+        timerDiv.textContent = `⏱️ 0:00`;
+        timerDiv.className = "header-timer working";
+
+        wrap.classList.add("active-block");
+        updateSummary(); refreshButtons(); renderSetListInner(listWrap, b);
     } else {
+        // === FINISH ===
         b.isWorking = false;
         let work = 0; if(b.currentSetStart) work = now - b.currentSetStart;
         GLOBAL_LAST_END_TIME = now;
+        
+        // Force Immediate Update
+        timerDiv.textContent = `☕ 0:00`;
+        timerDiv.className = "header-timer resting";
+
         const src = (b.activeSetIdx===null) ? b.temp : b.sets[b.activeSetIdx];
         if (b.activeSetIdx === null) {
             b.sets.push({ reps: src.reps, weight: src.weight, restTime: b.tempRestTime, workTime: work });
-            b.temp = { reps: src.reps, weight: src.weight };
+            b.temp = { reps: src.reps, weight: src.weight }; 
         } else {
             const old = b.sets[b.activeSetIdx];
-            b.sets[b.activeSetIdx] = { ...old, reps: src.reps, weight: src.weight };
+            b.sets[b.activeSetIdx] = { ...old, reps: src.reps, weight: src.weight }; 
             b.activeSetIdx = null; 
         }
-        wheelW.style.opacity = "1"; wheelW.style.pointerEvents = "auto";
-        wheelR.style.opacity = "1"; wheelR.style.pointerEvents = "auto";
+        b.lastSetEnd = now;
+        wrap.classList.remove("active-block");
         rebuildWheels(); updateSummary(); renderSetListInner(listWrap, b); refreshButtons();
     }
   });
@@ -498,7 +563,6 @@ function renderActionNav(){
     actionNav.append(chip);
   });
 }
-
 // ====== Export ======
 function blockToRow(b, dateStr){
   const part = CATALOG[b.part]?.label || b.part;
@@ -523,6 +587,14 @@ function collectTodayRows(){
 function renderExportPreview(rows){
   const container = document.getElementById("exportTableBody");
   if(!container) return; container.innerHTML = ""; container.className = "export-preview";
+  let totalTimeHtml = "";
+  if(SESSION_START_TIME) {
+     const duration = Date.now() - SESSION_START_TIME;
+     totalTimeHtml = `<div style="text-align:center; padding:10px; color:var(--accent-work); font-weight:bold; border-bottom:1px solid #333;">
+       ⏱ 今日訓練總時長：${fmtHours(duration)}
+     </div>`;
+  }
+  container.innerHTML = totalTimeHtml;
   rows.forEach(r => {
     let setDesc = [];
     for(let i=1; i<=4; i++) { if(r[`組${i}`] > 0) setDesc.push(`${r[`組${i}`]}x${r[`重${i}`]}`); }
@@ -533,7 +605,7 @@ function renderExportPreview(rows){
 }
 function resetMainFromCsv(){
   if(!confirm("確定要清除所有目前的訓練卡片嗎？")) return;
-  blocks.length = 0; idCounter = 1; currentPart = null; currentActionIdx = null; GLOBAL_LAST_END_TIME = null;
+  blocks.length = 0; idCounter = 1; currentPart = null; currentActionIdx = null; GLOBAL_LAST_END_TIME = null; SESSION_START_TIME = null;
   renderBottomNav(); renderActionNav(); renderMain();
 }
 
@@ -659,238 +731,117 @@ function renderRecordsTable(){
       floatBtn.onclick = () => { displayUnit = (displayUnit === "lb" ? "kg" : "lb"); renderRecordsTable(); };
   }
 }
-// ====== Calendar Logic (補回日曆功能) ======
+
+// ====== Calendar Logic ======
 function renderCalendarWeekdays(){
   const zh = ["日","一","二","三","四","五","六"];
   calendarWeekdays.innerHTML = zh.map(w=>`<div class="weekday">${w}</div>`).join("");
 }
-
 function partDotClass(partZh){
   const map = { "胸":"dot-chest","背":"dot-back","臀腿":"dot-legs","肩":"dot-shoulder","肱二頭":"dot-biceps","肱三頭":"dot-triceps","腰腹":"dot-core","前臂":"dot-cardio" };
   return map[partZh] || "dot-core";
 }
-
 function renderCalendar(){
   const rows = [...importedRows];
-
-  // 依日期聚合
   const partsByDate = {};
   rows.forEach(r=>{
     const dStr = r._dateStr || (r["日期"]||"").split("T")[0].replace(/-/g, '/');
     if (!dStr) return;
     (partsByDate[dStr] = partsByDate[dStr] || new Set()).add(r["部位"]);
   });
-
-  const y = calendarDate.getFullYear();
-  const m = calendarDate.getMonth();
-  const daysInMonth = new Date(y, m+1, 0).getDate();
-  const first = new Date(y, m, 1);
-  const startDow = first.getDay();
-
-  monthLabel.textContent = `${y}/${String(m+1).padStart(2,"0")}`;
-  calendarGrid.innerHTML = "";
-
-  const total = 42;
-  for (let i=0;i<total;i++){
-    const cell = el("div","day");
-    const dayNum = i - startDow + 1;
+  const y = calendarDate.getFullYear(); const m = calendarDate.getMonth();
+  const daysInMonth = new Date(y, m+1, 0).getDate(); const first = new Date(y, m, 1); const startDow = first.getDay();
+  monthLabel.textContent = `${y}/${String(m+1).padStart(2,"0")}`; calendarGrid.innerHTML = "";
+  for (let i=0;i<42;i++){
+    const cell = el("div","day"); const dayNum = i - startDow + 1;
     if (dayNum > 0 && dayNum <= daysInMonth){
       const dateStr = ymd(new Date(y, m, dayNum));
       cell.append(el("div","d", String(dayNum)));
-      
       const badges = el("div","badges");
       const parts = Array.from(partsByDate[dateStr] || []);
-      parts.forEach(p=>{
-        const dotCls = partDotClass(p);
-        const b = el("div","badge");
-        const dot = el("span",`dot ${dotCls}`);
-        b.append(dot); 
-        badges.append(b);
-      });
+      parts.forEach(p=>{ const b = el("div","badge"); b.append(el("span",`dot ${partDotClass(p)}`)); badges.append(b); });
       cell.append(badges);
-
-      cell.addEventListener("click", ()=>{
-        // 移除其他選中狀態
-        document.querySelectorAll(".day.selected").forEach(d=>d.classList.remove("selected"));
-        cell.classList.add("selected");
-        selectedCalDate = dateStr;
-        renderCalendarDetails();
-      });
-
+      cell.addEventListener("click", ()=>{ document.querySelectorAll(".day.selected").forEach(d=>d.classList.remove("selected")); cell.classList.add("selected"); selectedCalDate = dateStr; renderCalendarDetails(); });
       if (selectedCalDate === dateStr) cell.classList.add("selected");
     }
     calendarGrid.append(cell);
   }
-  
   renderCalendarDetails();
 }
-
 function renderCalendarDetails(){
   calSideList.innerHTML = "";
-  if (!selectedCalDate){
-    calSideTitle.textContent = "選擇日期查看詳情";
-    return;
-  }
+  if (!selectedCalDate){ calSideTitle.textContent = "選擇日期查看詳情"; return; }
   calSideTitle.textContent = selectedCalDate;
-
   const rows = (importedRows || []).filter(r => (r._dateStr || r["日期"]) === selectedCalDate);
-
-  if (rows.length === 0){
-    const li = el("li","side-item");
-    li.textContent = "這一天沒有紀錄";
-    calSideList.append(li);
-    return;
-  }
-
+  if (rows.length === 0){ calSideList.append(el("li","side-item","這一天沒有紀錄")); return; }
   rows.forEach(r=>{
     const li = el("li","side-item");
-    const top = el("div","si-top");
-    top.append(el("span","", `${r["部位"]} · ${r["動作"]}`));
-    li.append(top);
-
+    const top = el("div","si-top"); top.append(el("span","", `${r["部位"]} · ${r["動作"]}`)); li.append(top);
     const detail = el("div","si-sub");
     for (let i=1;i<=4;i++){
-      const reps = Number(r[`組${i}`]) || 0;
-      const wkg  = Number(r[`重${i}`]) || 0;
-      if (reps || wkg){
-        const lb = kgToNearestLbStep(wkg);
-        const line = el("div","si-line", `${reps} 下 @ ${lb} lb (${wkg} kg)`);
-        detail.append(line);
-      }
+      const reps = Number(r[`組${i}`]) || 0; const wkg  = Number(r[`重${i}`]) || 0;
+      if (reps || wkg){ const lb = kgToNearestLbStep(wkg); detail.append(el("div","si-line", `${reps} 下 @ ${lb} lb (${wkg} kg)`)); }
     }
-    li.append(detail);
-    calSideList.append(li);
+    li.append(detail); calSideList.append(li);
   });
 }
-
-// 日曆翻頁監聽器
 prevMonthBtn?.addEventListener("click", ()=>{ calendarDate = new Date(calendarDate.getFullYear(), calendarDate.getMonth()-1, 1); renderCalendar(); });
 nextMonthBtn?.addEventListener("click", ()=>{ calendarDate = new Date(calendarDate.getFullYear(), calendarDate.getMonth()+1, 1); renderCalendar(); });
 
-
-// ====== Settings Editor Logic (補回設定頁功能) ======
+// ====== Settings Editor Logic ======
 function renderEditor(){
-  if(!editorContainer) return;
-  editorContainer.innerHTML = "";
-  
+  if(!editorContainer) return; editorContainer.innerHTML = "";
   Object.entries(CATALOG).forEach(([key, val]) => {
     const box = el("div", "edit-group");
-    
-    // 標題與刪除部位按鈕
-    const head = el("div", "eg-head");
-    head.innerHTML = `<strong>${val.label}</strong> <span style="font-size:0.8em;opacity:0.6">(${key})</span>`;
-    
+    const head = el("div", "eg-head"); head.innerHTML = `<strong>${val.label}</strong> <span style="font-size:0.8em;opacity:0.6">(${key})</span>`;
     const delPartBtn = el("button", "btn btn-danger btn-sm", "刪除部位");
-    delPartBtn.onclick = () => {
-      if(confirm(`確定刪除「${val.label}」及其所有動作？`)) {
-        delete CATALOG[key];
-        renderEditor();
-      }
-    };
-    head.appendChild(delPartBtn);
-    box.appendChild(head);
-
-    // 動作列表
+    delPartBtn.onclick = () => { if(confirm(`確定刪除「${val.label}」及其所有動作？`)) { delete CATALOG[key]; renderEditor(); } };
+    head.appendChild(delPartBtn); box.appendChild(head);
     const ul = el("ul", "eg-list");
     val.exercises.forEach((ex, idx) => {
-      const li = el("li", "eg-item");
-      li.innerHTML = `<span>${ex}</span>`;
+      const li = el("li", "eg-item"); li.innerHTML = `<span>${ex}</span>`;
       const delExBtn = el("button", "btn btn-danger btn-sm", "×");
-      delExBtn.onclick = () => {
-        val.exercises.splice(idx, 1);
-        renderEditor();
-      };
-      li.appendChild(delExBtn);
-      ul.appendChild(li);
+      delExBtn.onclick = () => { val.exercises.splice(idx, 1); renderEditor(); };
+      li.appendChild(delExBtn); ul.appendChild(li);
     });
     box.appendChild(ul);
-
-    // 新增動作
     const addRow = el("div", "eg-add-row");
-    const input = el("input", "eg-input");
-    input.placeholder = "輸入新動作...";
+    const input = el("input", "eg-input"); input.placeholder = "輸入新動作...";
     const addBtn = el("button", "btn btn-primary btn-sm", "新增");
-    
-    const doAdd = () => {
-      if(input.value.trim()){
-        val.exercises.push(input.value.trim());
-        renderEditor();
-      }
-    };
-    addBtn.onclick = doAdd;
-    input.onkeydown = (e) => { if(e.key==="Enter") doAdd(); };
-
-    addRow.append(input, addBtn);
-    box.appendChild(addRow);
-    
+    const doAdd = () => { if(input.value.trim()){ val.exercises.push(input.value.trim()); renderEditor(); } };
+    addBtn.onclick = doAdd; input.onkeydown = (e) => { if(e.key==="Enter") doAdd(); };
+    addRow.append(input, addBtn); box.appendChild(addRow);
     editorContainer.appendChild(box);
   });
-
-  // 最下方：新增全新部位
-  const newPartBox = el("div", "edit-group new-part-box");
-  newPartBox.innerHTML = `<div class="eg-head"><strong>＋ 新增一個部位類別</strong></div>`;
+  const newPartBox = el("div", "edit-group new-part-box"); newPartBox.innerHTML = `<div class="eg-head"><strong>＋ 新增一個部位類別</strong></div>`;
   const npRow = el("div", "eg-add-row");
-  
   const keyInput = el("input", "eg-input"); keyInput.placeholder = "ID (英文,如 legs)";
   const labelInput = el("input", "eg-input"); labelInput.placeholder = "顯示名稱 (如 臀腿)";
   const npBtn = el("button", "btn btn-primary btn-sm", "新增");
-  
   npBtn.onclick = () => {
-    const k = keyInput.value.trim();
-    const l = labelInput.value.trim();
-    if(k && l){
-      if(CATALOG[k]) { alert("這個 ID 已經存在了"); return; }
-      CATALOG[k] = { label: l, exercises: [] };
-      renderEditor();
-    } else {
-      alert("請輸入 ID (英文) 與 顯示名稱");
-    }
+    const k = keyInput.value.trim(); const l = labelInput.value.trim();
+    if(k && l){ if(CATALOG[k]) { alert("ID 已存在"); return; } CATALOG[k] = { label: l, exercises: [] }; renderEditor(); } else { alert("請輸入完整"); }
   };
-  npRow.append(keyInput, labelInput, npBtn);
-  newPartBox.appendChild(npRow);
-  editorContainer.appendChild(newPartBox);
+  npRow.append(keyInput, labelInput, npBtn); newPartBox.appendChild(npRow); editorContainer.appendChild(newPartBox);
 }
-
-// 綁定設定頁儲存按鈕
 saveCatalogBtn?.addEventListener("click", async () => {
-  saveCatalogBtn.disabled = true;
-  saveCatalogBtn.textContent = "儲存中...";
+  saveCatalogBtn.disabled = true; saveCatalogBtn.textContent = "儲存中...";
   try {
-    const r = await fetch(API_BASE, {
-      method: "POST",
-      body: JSON.stringify({ type: "config", catalog: CATALOG }), 
-    });
+    const r = await fetch(API_BASE, { method: "POST", body: JSON.stringify({ type: "config", catalog: CATALOG }), });
     const j = await r.json();
-    if(j.ok) {
-      alert("設定已儲存！");
-      renderBottomNav();
-      renderActionNav();
-    } else {
-      alert("儲存失敗：" + j.error);
-    }
-  } catch(e) {
-    alert("連線錯誤");
-    console.error(e);
-  }
-  saveCatalogBtn.disabled = false;
-  saveCatalogBtn.textContent = "儲存變更到雲端";
+    if(j.ok) { alert("設定已儲存！"); renderBottomNav(); renderActionNav(); } else { alert("儲存失敗：" + j.error); }
+  } catch(e) { alert("連線錯誤"); console.error(e); }
+  saveCatalogBtn.disabled = false; saveCatalogBtn.textContent = "儲存變更到雲端";
 });
 
 // ====== Tabs Switching ======
 tabs.forEach(btn=>{
   btn.addEventListener("click", ()=>{
-    tabs.forEach(b=>b.classList.remove("active"));
-    btn.classList.add("active");
+    tabs.forEach(b=>b.classList.remove("active")); btn.classList.add("active");
     const tab = btn.dataset.tab;
-    
     Object.values(pages).forEach(p=>p?.classList.remove("show"));
     if(pages[tab]) pages[tab].classList.add("show");
-    
-    if(tab === "settings") {
-      document.getElementById("page-settings")?.classList.add("show");
-      renderEditor();
-    }
-
+    if(tab === "settings") { document.getElementById("page-settings")?.classList.add("show"); renderEditor(); }
     if (tab === "calendar") { renderCalendarWeekdays(); renderCalendar(); }
     if (tab === "records")  { renderRecordsTable(); }
   });
@@ -900,7 +851,7 @@ tabs.forEach(btn=>{
 (async function init(){
   try { await reloadFromBackend(); } catch(e){ console.warn("後端連線中...", e); }
   renderCalendarWeekdays();
-  blocks.length = 0; idCounter = 1; currentPart = null; currentActionIdx = null; GLOBAL_LAST_END_TIME = null;
+  blocks.length = 0; idCounter = 1; currentPart = null; currentActionIdx = null; GLOBAL_LAST_END_TIME = null; SESSION_START_TIME = null;
   if(importedRows.length > 0) renderRecordsFilters(importedRows); 
   renderRecordsTable();
   renderBottomNav(); renderActionNav(); renderMain();
