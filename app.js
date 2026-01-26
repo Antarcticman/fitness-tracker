@@ -333,6 +333,7 @@ function renderBlock(b){
   rightFooter.append(endBtn);
   rightCol.append(listWrap, rightFooter);
 
+  // 核心邏輯區
   const updateSummary = ()=>{
     if(b.isWorking) timerDiv.className = "header-timer working";
     else timerDiv.className = "header-timer resting";
@@ -343,29 +344,48 @@ function renderBlock(b){
       timerDiv.textContent = ""; 
       return; 
     }
-    const idx = (b.activeSetIdx===null) ? (b.sets.length+1) : (b.activeSetIdx+1);
-    if (b.isWorking) {
-        sText.textContent = `🔥 第 ${idx} 組進行中...`;
-        sText.style.color = "#4ade80"; 
-        actionBtn.textContent = "完成這一組";
-        actionBtn.className = "btn btn-danger"; 
-    } else {
-        const src = (b.activeSetIdx===null) ? b.temp : b.sets[b.activeSetIdx];
+
+    // 狀態判斷：編輯舊資料 vs 準備新資料
+    if (b.activeSetIdx !== null && !b.isWorking) {
+        // === 編輯模式 ===
+        const src = b.sets[b.activeSetIdx];
         const kg = Number(src.weight)||0;
         const lb = kgToNearestLbStep(kg);
+        // ★ 修正文字：顯示「編輯第 N 組」
+        sText.textContent = `編輯第 ${b.activeSetIdx + 1} 組：${lb} lb (${kg} kg) · ${src.reps} 下`;
+        sText.style.color = "var(--accent-rest)"; // 用黃色區分編輯狀態
         
-        let refTime = b.lastSetEnd || (b.sets.length===0 ? GLOBAL_LAST_END_TIME : null);
-        if(refTime) {
-             const diff = Date.now() - refTime;
-             timerDiv.textContent = `☕ ${fmtDuration(diff)}`;
+        // 編輯時隱藏開始按鈕 (避免誤觸) 或 顯示「完成編輯」
+        actionBtn.textContent = "完成編輯";
+        actionBtn.className = "btn btn-primary"; // 變回紫色
+    } else {
+        // === 準備/進行模式 ===
+        const idx = b.sets.length + 1;
+        if (b.isWorking) {
+            sText.textContent = `🔥 第 ${idx} 組進行中...`;
+            sText.style.color = "#4ade80"; 
+            actionBtn.textContent = "完成這一組";
+            actionBtn.className = "btn btn-danger"; 
         } else {
-             timerDiv.textContent = ""; 
-        }
+            const src = b.temp; // 讀取暫存區
+            const kg = Number(src.weight)||0;
+            const lb = kgToNearestLbStep(kg);
+            
+            // 休息計時
+            let refTime = b.lastSetEnd || (b.sets.length===0 ? GLOBAL_LAST_END_TIME : null);
+            if(refTime) {
+                 const diff = Date.now() - refTime;
+                 timerDiv.textContent = `☕ ${fmtDuration(diff)}`;
+            } else {
+                 timerDiv.textContent = ""; 
+            }
 
-        sText.textContent = (idx > MAX_SETS) ? "已完成四組訓練" : `準備：${lb} lb (${kg} kg) · ${src.reps} 下`;
-        sText.style.color = "var(--accent)";
-        actionBtn.textContent = (idx > MAX_SETS) ? "已完成四組" : "開始這一組";
-        actionBtn.className = "btn btn-start"; 
+            // ★ 修正文字：顯示「準備」
+            sText.textContent = (idx > MAX_SETS) ? "已完成四組訓練" : `準備：${lb} lb (${kg} kg) · ${src.reps} 下`;
+            sText.style.color = "var(--accent)";
+            actionBtn.textContent = (idx > MAX_SETS) ? "已完成四組" : "開始這一組";
+            actionBtn.className = "btn btn-start"; 
+        }
     }
   };
 
@@ -374,22 +394,31 @@ function renderBlock(b){
     const src = editingExisting ? b.sets[b.activeSetIdx] : b.temp;
     const lbValues = []; for (let lb=0; lb<=LB_MAX; lb+=LB_STEP) lbValues.push(lb);
     const initLb = kgToNearestLbStep(Number(src.weight)||0);
+    
+    // 轉盤重建時，避免重複綁定，buildWheel 會清空 innerHTML
     buildWheel(wheelW, lbValues, initLb, (valLb)=>{
       const valKg = Math.round(lbToKg(valLb)*10)/10;
-      if (b.activeSetIdx===null) b.temp.weight = valKg; else b.sets[b.activeSetIdx].weight = valKg;
-      const idx = (b.activeSetIdx===null) ? (b.sets.length+1) : (b.activeSetIdx+1);
-      if(!b.isWorking && idx <= MAX_SETS) {
-         const lb = kgToNearestLbStep(valKg);
-         sText.textContent = `準備：${lb} lb (${valKg} kg) · ${src.reps} 下`;
+      
+      if (b.activeSetIdx === null) {
+          // 準備模式：只改 temp
+          b.temp.weight = valKg;
+      } else {
+          // ★ 編輯模式：直接改 sets 資料，並強制刷新列表 (即時聯動)
+          b.sets[b.activeSetIdx].weight = valKg;
+          renderSetListInner(listWrap, b); // 讓右邊列表數字跟著跳
       }
+      updateSummary(); // 讓標題文字跟著跳
     });
+
     buildWheel(wheelR, rangeArray(1,20,1), Number(src.reps)||10, (val)=>{
-      if (b.activeSetIdx===null) b.temp.reps = val; else b.sets[b.activeSetIdx].reps = val;
-      const idx = (b.activeSetIdx===null) ? (b.sets.length+1) : (b.activeSetIdx+1);
-      if(!b.isWorking && idx <= MAX_SETS) {
-         const kg = Number(src.weight)||0; const lb = kgToNearestLbStep(kg);
-         sText.textContent = `準備：${lb} lb (${kg} kg) · ${val} 下`;
+      if (b.activeSetIdx === null) {
+          b.temp.reps = val;
+      } else {
+          // ★ 編輯模式：即時聯動
+          b.sets[b.activeSetIdx].reps = val;
+          renderSetListInner(listWrap, b);
       }
+      updateSummary();
     });
   }
   rebuildWheels();                                   
@@ -401,10 +430,20 @@ function renderBlock(b){
         return;
     }
     const full = b.sets.length >= MAX_SETS;
-    if (b.isWorking) {
+    
+    // 按鈕狀態控制
+    if (b.activeSetIdx !== null) {
+        // 編輯中
+        actionBtn.style.display = "inline-flex";
+        actionBtn.disabled = false;
+        endBtn.disabled = true; // 編輯舊資料時不能結束動作
+        endBtn.style.opacity = "0.5";
+    } else if (b.isWorking) {
+        // 進行中
         actionBtn.style.display = "inline-flex"; actionBtn.disabled = false;
         endBtn.disabled = true; endBtn.style.opacity = "0.5"; endBtn.textContent = "訓練進行中...";
     } else {
+        // 準備中
         actionBtn.style.display = "inline-flex"; actionBtn.disabled = full; 
         if (b.sets.length > 0) { endBtn.disabled = false; endBtn.style.opacity = "1"; endBtn.textContent = "結束此動作"; } 
         else { endBtn.disabled = true; endBtn.style.opacity = "0.5"; endBtn.textContent = "請先完成一組"; }
@@ -428,17 +467,31 @@ function renderBlock(b){
             ${workTag}
         </div>
       `;
+      
+      // ★ 點擊邏輯優化：切換選取狀態
       infoDiv.addEventListener("click", ()=>{
-        if(bRef.isWorking) return; 
-        bRef.activeSetIdx = idx;
-        rebuildWheels(); updateSummary(); renderSetListInner(container, bRef); refreshButtons();
+        if(bRef.isWorking) return; // 運動中不能改舊資料
+        
+        if (bRef.activeSetIdx === idx) {
+            // 再次點擊 -> 取消選取 (回到準備狀態)
+            bRef.activeSetIdx = null;
+        } else {
+            // 選取該組
+            bRef.activeSetIdx = idx;
+        }
+        rebuildWheels(); 
+        updateSummary(); 
+        renderSetListInner(container, bRef); 
+        refreshButtons();
       });
+
       const delBtn = el("button", "del-btn", "✕");
       delBtn.addEventListener("click", (e)=>{
         e.stopPropagation();
         if(bRef.isWorking) { alert("請先完成目前這一組"); return; }
         if(confirm(`確定刪除第 ${idx+1} 組嗎？`)){
           bRef.sets.splice(idx, 1); bRef.activeSetIdx = null;
+          // 刪除後把最新一組的數據帶入 temp，方便繼續做
           if(bRef.sets.length > 0) bRef.temp = { ...bRef.sets[bRef.sets.length-1] };
           rebuildWheels(); updateSummary(); renderSetListInner(container, bRef); refreshButtons();
         }
@@ -447,7 +500,6 @@ function renderBlock(b){
       container.append(li);
     });
     
-    // Ghost Row
     if(bRef.isWorking) {
       const ghostLi = el("li", "set-item ghost");
       ghostLi.innerHTML = `
@@ -464,8 +516,20 @@ function renderBlock(b){
   updateSummary();
   refreshButtons(); 
 
+  // 按鈕事件：支援「完成編輯」邏輯
   actionBtn.addEventListener("click", ()=>{
     if (b.ended) return;
+    
+    // 如果正在編輯舊資料 -> 點按鈕等於「完成編輯」(回到準備狀態)
+    if (b.activeSetIdx !== null) {
+        b.activeSetIdx = null;
+        rebuildWheels(); 
+        updateSummary(); 
+        renderSetListInner(listWrap, b); 
+        refreshButtons();
+        return;
+    }
+
     const now = Date.now();
     if(!SESSION_START_TIME) SESSION_START_TIME = now;
 
@@ -478,7 +542,6 @@ function renderBlock(b){
         let rest = 0; if(lastEnd) rest = now - lastEnd; 
         b.tempRestTime = rest;
 
-        // Force Immediate Update
         timerDiv.textContent = `⏱️ 0:00`;
         timerDiv.className = "header-timer working";
 
@@ -490,19 +553,16 @@ function renderBlock(b){
         let work = 0; if(b.currentSetStart) work = now - b.currentSetStart;
         GLOBAL_LAST_END_TIME = now;
         
-        // Force Immediate Update
         timerDiv.textContent = `☕ 0:00`;
         timerDiv.className = "header-timer resting";
 
-        const src = (b.activeSetIdx===null) ? b.temp : b.sets[b.activeSetIdx];
-        if (b.activeSetIdx === null) {
-            b.sets.push({ reps: src.reps, weight: src.weight, restTime: b.tempRestTime, workTime: work });
-            b.temp = { reps: src.reps, weight: src.weight }; 
-        } else {
-            const old = b.sets[b.activeSetIdx];
-            b.sets[b.activeSetIdx] = { ...old, reps: src.reps, weight: src.weight }; 
-            b.activeSetIdx = null; 
-        }
+        // 寫入新紀錄
+        const src = b.temp; // 這裡一定讀 temp，因為 activeSetIdx 為 null
+        b.sets.push({ reps: src.reps, weight: src.weight, restTime: b.tempRestTime, workTime: work });
+        
+        // 繼承給下一組
+        b.temp = { reps: src.reps, weight: src.weight }; 
+        
         b.lastSetEnd = now;
         wrap.classList.remove("active-block");
         rebuildWheels(); updateSummary(); renderSetListInner(listWrap, b); refreshButtons();
@@ -549,16 +609,31 @@ function renderActionNav(){
       const currentActive = getActiveBlock();
       if (currentActive && !currentActive.ended) {
         if (currentActive.part === currentPart && currentActive.actionIdx === i) return;
-        alert("請先完成或刪除目前的動作，才能選擇下一個動作！"); return;
+        alert("請先完成或刪除目前的動作，才能選擇下一個動作！"); 
+        
+        // ★ 如果有未完成的動作，試圖切換時自動捲動回去提醒使用者
+        const activeEl = document.querySelector(".active-block");
+        if(activeEl) activeEl.scrollIntoView({behavior: "smooth", block: "start"});
+        return;
       }
+      
       currentActionIdx = i;
-      createBlock(currentPart, i);
+      const newBlock = createBlock(currentPart, i); // 建立新區塊
+      
+      // 繼承上一次重量
       const nb = getActiveBlock();
       const partZh = CATALOG[nb.part].label;
       const nm   = CATALOG[nb.part].exercises[nb.actionIdx];
       const last = getLastDefaultsFromCsv(partZh, nm);
       nb.temp = { reps:last.reps, weight:last.weight };
-      renderActionNav(); renderMain();      
+      
+      renderActionNav(); 
+      renderMain();
+      
+      // ★ 修正：建立新動作後，直接捲動到頁面最底部
+      setTimeout(() => {
+          window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+      }, 100);
     });
     actionNav.append(chip);
   });
@@ -768,21 +843,51 @@ function renderCalendar(){
   }
   renderCalendarDetails();
 }
+// 修改後的日曆詳情函式 (包含時間計算)
 function renderCalendarDetails(){
   calSideList.innerHTML = "";
   if (!selectedCalDate){ calSideTitle.textContent = "選擇日期查看詳情"; return; }
-  calSideTitle.textContent = selectedCalDate;
+  
+  // 篩選出當天的資料
   const rows = (importedRows || []).filter(r => (r._dateStr || r["日期"]) === selectedCalDate);
+  
+  // ★ 計算當日總秒數 (累加所有 秒n 與 休n)
+  let totalSec = 0;
+  rows.forEach(r => {
+      for(let i=1; i<=4; i++){
+          totalSec += (Number(r[`秒${i}`]) || 0);
+          totalSec += (Number(r[`休${i}`]) || 0);
+      }
+  });
+
+  // 標題顯示日期 + 總時間
+  let timeStr = "";
+  if(totalSec > 0) {
+      const h = Math.floor(totalSec/3600);
+      const m = Math.floor((totalSec%3600)/60);
+      timeStr = ` (${h}小時${m}分)`;
+  }
+  calSideTitle.textContent = `${selectedCalDate}${timeStr}`;
+
   if (rows.length === 0){ calSideList.append(el("li","side-item","這一天沒有紀錄")); return; }
+  
   rows.forEach(r=>{
     const li = el("li","side-item");
-    const top = el("div","si-top"); top.append(el("span","", `${r["部位"]} · ${r["動作"]}`)); li.append(top);
+    const top = el("div","si-top"); 
+    top.append(el("span","", `${r["部位"]} · ${r["動作"]}`)); 
+    li.append(top);
+    
     const detail = el("div","si-sub");
     for (let i=1;i<=4;i++){
-      const reps = Number(r[`組${i}`]) || 0; const wkg  = Number(r[`重${i}`]) || 0;
-      if (reps || wkg){ const lb = kgToNearestLbStep(wkg); detail.append(el("div","si-line", `${reps} 下 @ ${lb} lb (${wkg} kg)`)); }
+      const reps = Number(r[`組${i}`]) || 0; 
+      const wkg  = Number(r[`重${i}`]) || 0;
+      if (reps || wkg){ 
+          const lb = kgToNearestLbStep(wkg); 
+          detail.append(el("div","si-line", `${reps} 下 @ ${lb} lb (${wkg} kg)`)); 
+      }
     }
-    li.append(detail); calSideList.append(li);
+    li.append(detail); 
+    calSideList.append(li);
   });
 }
 prevMonthBtn?.addEventListener("click", ()=>{ calendarDate = new Date(calendarDate.getFullYear(), calendarDate.getMonth()-1, 1); renderCalendar(); });
@@ -837,10 +942,27 @@ saveCatalogBtn?.addEventListener("click", async () => {
 // ====== Tabs Switching ======
 tabs.forEach(btn=>{
   btn.addEventListener("click", ()=>{
-    tabs.forEach(b=>b.classList.remove("active")); btn.classList.add("active");
+    tabs.forEach(b=>b.classList.remove("active")); 
+    btn.classList.add("active");
     const tab = btn.dataset.tab;
+    
     Object.values(pages).forEach(p=>p?.classList.remove("show"));
     if(pages[tab]) pages[tab].classList.add("show");
+    
+    // ★ 切回主頁時的捲動邏輯
+    if(tab === "main") {
+        setTimeout(() => {
+            // 優先找正在進行的卡片
+            const activeEl = document.querySelector(".active-block");
+            if(activeEl) {
+                activeEl.scrollIntoView({behavior: "smooth", block: "start"});
+            } else {
+                // 如果都沒有，就捲到最下面 (通常是最新建立的動作)
+                window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+            }
+        }, 100);
+    }
+
     if(tab === "settings") { document.getElementById("page-settings")?.classList.add("show"); renderEditor(); }
     if (tab === "calendar") { renderCalendarWeekdays(); renderCalendar(); }
     if (tab === "records")  { renderRecordsTable(); }
