@@ -778,27 +778,62 @@ function renderRecordsTable(){
   let rows = Array.isArray(importedRows) ? [...importedRows] : [];
   if (recFilterPart) rows = rows.filter(r => r["部位"] === recFilterPart);
   if (recFilterAction) rows = rows.filter(r => r["動作"] === recFilterAction);
+  
   chartUnit = displayUnit; 
   renderTrendChart(rows, recFilterAction);
+  
   rows.sort((a,b)=> (a["日期"] < b["日期"] ? 1 : (a["日期"] > b["日期"] ? -1 : 0)));
   recordsTbody.innerHTML = "";
+  
   rows.forEach(r=>{
     const tr = document.createElement("tr");
-    const dateRaw = r["日期"] || ""; const cleanDate = r._dateStr || dateRaw.split("T")[0];
-    [cleanDate, r["部位"], r["動作"]].forEach(txt => { const td = document.createElement("td"); td.textContent = txt; tr.appendChild(td); });
+    
+    // 1. 日期簡化 (只取 MM/DD)
+    const dateRaw = r["日期"] || ""; 
+    let cleanDate = r._dateStr || dateRaw.split("T")[0];
+    if(cleanDate.length >= 5) cleanDate = cleanDate.substring(5); 
+    
+    [cleanDate, r["部位"], r["動作"]].forEach(txt => { 
+        const td = document.createElement("td"); 
+        td.textContent = txt; 
+        tr.appendChild(td); 
+    });
+
+    // 2. 建立組數欄位
     for(let i=1; i<=4; i++){
        const td = document.createElement("td");
-       const reps = Number(r[`組${i}`]) || 0; const weight = Number(r[`重${i}`]) || 0; const sec = Number(r[`秒${i}`]) || 0;
+       const reps = Number(r[`組${i}`]) || 0; 
+       const weight = Number(r[`重${i}`]) || 0; 
+       const sec = Number(r[`秒${i}`]) || 0; 
+       
        if(reps > 0 || weight > 0){
            let wDisplay = "";
-           if(displayUnit === "lb"){ const lb = kgToNearestLbStep(weight); wDisplay = `${lb} lb`; } else { wDisplay = `${weight} kg`; }
-           let timeHtml = sec > 0 ? `<span style="font-size:0.7em; color:#4ade80;">⏱${sec}s</span>` : "";
-           td.innerHTML = `<div style="font-weight:bold; color:#fff;">${reps} 下</div><div class="cell-sub">${wDisplay}</div>${timeHtml}`;
-       } else { td.textContent = "-"; td.style.color = "#444"; }
+           // ★ 單位加回來了
+           if(displayUnit === "lb"){ 
+               const lb = kgToNearestLbStep(weight); 
+               wDisplay = `${lb} lb`; 
+           } else { 
+               wDisplay = `${weight} kg`; 
+           }
+           
+           // 秒數顯示 (如果有)
+           let timeHtml = sec > 0 ? `<div class="set-time">⏱️ ${sec}s</div>` : "";
+
+           // 結構：組數跟重量用 div 包起來，方便 CSS 控制
+           td.innerHTML = `
+             <div class="set-main">${reps} 下</div>
+             <div class="set-main">${wDisplay}</div>
+             ${timeHtml}
+           `;
+       } else { 
+           td.textContent = "-"; 
+           td.style.color = "#444"; 
+       }
        tr.appendChild(td);
     }
     recordsTbody.appendChild(tr);
   });
+  
   const floatBtn = document.getElementById("toggleUnitFloatBtn");
   if(floatBtn) {
       floatBtn.textContent = `單位: ${displayUnit.toUpperCase()}`;

@@ -195,14 +195,67 @@ body.working-mode #bg-gradient::before { opacity: 1; }
 .eg-add-row { display: flex; gap: 8px; padding: 15px 20px; background: rgba(0,0,0,0.1); }
 .eg-input { background: rgba(0,0,0,0.3); border: 1px solid var(--border-glass); padding: 10px 15px; color: #fff; border-radius: 8px; flex: 1; font-size: 0.95rem; }
 .new-part-box { border-style: dashed; border-color: rgba(255,255,255,0.2); background: transparent; }
+/* === 6. 紀錄表格 (Global / Desktop) === */
+.table-wrap { 
+  overflow-x: auto; 
+  background: var(--bg-glass); 
+  border-radius: var(--radius); 
+  border: 1px solid var(--border-glass); 
+}
 
-/* ====== Mobile Optimization (手機版專用調整 v2.7 - 去除圓點版) ====== */
+.records-table { 
+  width: 100%; 
+  border-collapse: collapse; 
+  table-layout: fixed; /* ★ 核心：電腦版也強制鎖定欄寬 */
+}
+
+.records-table th, .records-table td { 
+  padding: 12px 15px; /* 電腦版空間大，維持舒適的間距 */
+  text-align: center; /* ★ 全部置中 (包含動作、日期) */
+  vertical-align: middle;
+  border-bottom: 1px solid rgba(255,255,255,0.05); 
+  white-space: normal; /* 允許換行，以免字太長 */
+  overflow: hidden;
+}
+
+.records-table th { 
+  background: rgba(0,0,0,0.3); 
+  color: var(--text-muted); 
+  font-weight: normal; 
+  font-size: 0.95rem; 
+}
+
+/* ★ 電腦版寬度黃金比例 (總和 100%) */
+/* 這樣切換單位時，表格邊框絕對不會動 */
+.records-table th:nth-child(1) { width: 12%; } /* 日期 */
+.records-table th:nth-child(2) { width: 10%; } /* 部位 */
+.records-table th:nth-child(3) { width: 22%; } /* 動作 (給多一點空間) */
+/* 剩餘 56% 平分給 4 個組數 -> 每欄 14% */
+
+/* 確保動作名稱也是置中 */
+.records-table td:nth-child(3) {
+  text-align: center;
+}
+
+/* 讓電腦版的字體稍微大氣一點 */
+.set-main {
+  font-size: 1rem; 
+  font-weight: bold;
+  color: #fff;
+}
+.set-time {
+  font-size: 0.8rem;
+  color: #4ade80;
+  margin-top: 4px;
+}
+
+/* ====== Mobile Optimization (手機版專用調整 v3.0 - 單位回歸版) ====== */
 @media (max-width: 768px) {
   /* 全域底部留白 */
   body { padding-bottom: 200px; }
   .page { padding: 5px; }
 
-  /* === 1. 導覽列完全修正 (無圓點、不佔位) === */
+  /* === 1. 導覽列 (維持你原本滿意的設定) === */
   .bottom-nav {
     grid-template-columns: repeat(4, 1fr);
     padding-bottom: 15px;
@@ -212,99 +265,48 @@ body.working-mode #bg-gradient::before { opacity: 1; }
     padding-top: 10px;
     row-gap: 15px;
   }
-  
-  /* 按鈕本體 */
   .nav-btn {
-    height: 30px !important; /* 強制固定高度 */
-    padding: 0 !important;
-    display: flex;
-    flex-direction: column;
-    justify-content: center; /* 內容垂直置中 */
-    align-items: center;
-    position: relative; /* 重置定位 */
+    height: 30px !important; padding: 0 !important;
+    display: flex; flex-direction: column; justify-content: center; align-items: center;
+    position: relative; 
   }
-  
-  /* ★ 徹底移除上方的圓點 (設為 none 不佔空間) */
-  .nav-btn::before {
-    content: none !important;
-    display: none !important;
-  }
-  
-  /* 字體調整 */
-  .nav-btn span { 
-    font-size: 0.8rem; 
-    line-height: 1; 
-    display: block; 
-    transform: none !important; /* 禁止位移 */
-    margin: 0 !important;
-  }
-  
-  /* 選中時字體只稍微變大 */
-  .nav-btn.active span { 
-    font-size: 0.95rem !important; 
-    font-weight: bold;
-    color: #fff;
-    text-shadow: 0 0 5px rgba(168, 85, 247, 0.6);
-  }
+  .nav-btn::before { content: none !important; display: none !important; }
+  .nav-btn span { font-size: 0.8rem; line-height: 1; display: block; transform: none !important; margin: 0 !important; }
+  .nav-btn.active span { font-size: 0.95rem !important; font-weight: bold; color: #fff; text-shadow: 0 0 5px rgba(168, 85, 247, 0.6); }
 
   /* === 2. 上方動作列 (Action Nav) === */
-  .action-nav-wrap {
-    padding: 5px;
-    margin-bottom: 5px;
-  }
-  .action-chip {
-    padding: 6px 14px;
-    font-size: 0.85rem;
-  }
+  .action-nav-wrap { padding: 5px; margin-bottom: 5px; }
+  .action-chip { padding: 6px 14px; font-size: 0.85rem; }
 
-  /* === 3. 卡片緊湊化 (Card Optimization) === */
-  .block {
-    padding: 10px; 
-    gap: 10px;     
-    margin-bottom: 5px; 
-  }
-
-  /* Header 壓縮 */
+  /* === 3. 卡片緊湊化 === */
+  .block { padding: 10px; gap: 10px; margin-bottom: 5px; }
   .summary { padding-bottom: 8px; margin-bottom: 8px; gap: 5px; }
   .summary-top { height: 36px; }
   .hname { font-size: 1.1rem; }
   .header-timer { font-size: 1.3rem; min-width: 70px; }
   .del-btn { font-size: 1.2rem; }
-
-  /* 按鈕區 */
-  .action-btn-group {
-    min-height: auto; 
-    margin-top: 5px;
-  }
+  .action-btn-group { min-height: auto; margin-top: 5px; }
+  .action-btn-group .btn { height: 45px; font-size: 1rem; padding: 0; display: flex; align-items: center; justify-content: center; }
   
-  /* 開始/完成按鈕高度固定 45px */
-  .action-btn-group .btn {
-    height: 45px;
-    font-size: 1rem;
-    padding: 0; 
-    display: flex; 
-    align-items: center; 
-    justify-content: center;
-  }
-
-  /* 列表極限壓縮 */
+  .picker { height: 80px; margin-bottom: 10px; }
+  .col::after { height: 30px; margin-top: -15px; }
+  .opt { height: 30px; font-size: 1rem; }
+  .opt.active { font-size: 1.2rem; }
+  .lab, .lab2 { margin: 4px 0; font-size: 0.7rem; } 
   .set-list { gap: 2px; }
   .set-item { min-height: 30px; padding: 2px 8px; }
   .set-info-row { gap: 4px; }
   .badge { font-size: 0.65rem; padding: 1px 5px; }
   .sline { font-size: 0.85rem; }
   .work-tag { font-size: 0.65rem; padding: 0 4px; }
-  
-  /* 休息分隔線 */
   .rest-separator { margin: 1px 0; font-size: 0.65rem; }
 
   /* === 4. 其他浮動元件 === */
   .float-btn-wrap { top: auto; bottom: 115px; right: 15px; flex-direction: row; gap: 8px; }
   .finish-btn, .clear-btn { width: auto; min-width: 80px; padding: 8px 12px; font-size: 0.85rem; box-shadow: 0 4px 10px rgba(0,0,0,0.3); }
-  
   #toggleUnitFloatBtn { bottom: 110px !important; right: 15px !important; z-index: 101 !important; }
 
-  /* 紀錄頁與日曆 */
+  /* 紀錄與日曆 */
   .records-filters .chip-row { flex-wrap: wrap !important; overflow-x: visible; height: auto; }
   .cal-layout { gap: 10px; }
   .calendar-grid { gap: 1px; }
@@ -313,12 +315,50 @@ body.working-mode #bg-gradient::before { opacity: 1; }
   .badges { gap: 1px; }
   .badge { background: transparent !important; padding: 0; border: none; }
   .dot { width: 4px; height: 4px; margin: 0 1px; }
-  
-  /* Export Panel 高度修正 (加高) */
   .export-card { min-height: 60vh; padding-bottom: 50px; justify-content: flex-start; }
   .export-preview { max-height: 45vh !important; flex: 1; margin-bottom: 20px; }
 
-  .records-table th, .records-table td { padding: 4px 2px; font-size: 0.75rem; }
-  .records-table td:first-child { font-size: 0.7rem; white-space: normal; max-width: 45px; }
+  /* ★★★ 5. 表格修正 (置中 + 單位空間) ★★★ */
   .table-wrap { margin: 0 -5px; }
+  
+  .records-table {
+    width: 100%;
+    table-layout: fixed;
+    border-collapse: collapse;
+  }
+
+  .records-table th, .records-table td {
+    padding: 6px 1px;
+    font-size: 0.75rem; 
+    text-align: center; /* ★ 全部置中 (包含動作) */
+    vertical-align: middle;
+    overflow: hidden;
+  }
+
+  /* 寬度微調：給組數多一點點空間放單位 */
+  .records-table th:nth-child(1) { width: 11%; } /* 日期 */
+  .records-table th:nth-child(2) { width: 11%; } /* 部位 */
+  .records-table th:nth-child(3) { width: 20%; } /* 動作 (縮小一點) */
+  /* 剩餘 58% / 4 = 14.5% */
+
+  .records-table td:nth-child(3) {
+    white-space: normal;
+    line-height: 1.1;
+    font-size: 0.7rem;
+    /* text-align: left; <--- 移除這行，就會繼承上面的 center */
+  }
+  
+  .records-table td:nth-child(1),
+  .records-table td:nth-child(2) {
+    white-space: nowrap;
+    font-size: 0.7rem;
+  }
+
+  /* 手機版字體微調 */
+  .set-main {
+    font-size: 0.7rem; /* 手機上字稍微小一點以免換行 */
+  }
+  .set-time {
+    font-size: 0.6rem;
+  }
 }
