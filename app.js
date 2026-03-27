@@ -10,12 +10,42 @@ let currentPart = null;
 let currentActionIdx = null; 
 const blocks = []; 
 let idCounter = 1;
-let GLOBAL_LAST_END_TIME = null; 
 let SESSION_START_TIME = null; 
 let importedRows = []; 
 let myChart = null;
 let chartUnit = "kg"; 
 let displayUnit = "kg"; 
+
+// ====== UI 輔助函式 (Toast & Modal) ======
+function showToast(msg) {
+  const t = document.getElementById("toast");
+  t.textContent = msg; t.classList.add("show");
+  setTimeout(() => t.classList.remove("show"), 2500);
+}
+
+function showConfirm(title, body, onConfirm) {
+  const m = document.getElementById("customModal");
+  document.getElementById("modalTitle").textContent = title;
+  document.getElementById("modalBody").textContent = body;
+  m.classList.remove("hidden");
+  
+  const btnC = document.getElementById("modalBtnCancel");
+  const btnO = document.getElementById("modalBtnConfirm");
+  
+  btnC.onclick = () => m.classList.add("hidden");
+  btnO.onclick = () => { m.classList.add("hidden"); onConfirm(); };
+}
+
+// ====== 真理時間軸 (絕對時間掃描) ======
+function getLatestEndTime() {
+  let latest = null;
+  blocks.forEach(b => {
+    b.sets.forEach(s => {
+      if (s.endTime && (!latest || s.endTime > latest)) latest = s.endTime;
+    });
+  });
+  return latest || SESSION_START_TIME; 
+}
 
 // ====== DOM ======
 const appRoot   = document.getElementById("appRoot");
@@ -91,36 +121,56 @@ function fmtHours(ms){
 }
 
 // ====== 全域計時器 & 狀態監控 ======
+// ====== 全域計時器 & 狀態監控 ======
 setInterval(() => {
   const activeB = blocks.find(b => b.isWorking && !b.ended);
   
-  // 1. 更新卡片上的計時器 (工作)
+  // 1. 更新工作計時器
   if (activeB && activeB.currentSetStart) {
     const el = document.getElementById(`header-timer-${activeB.id}`);
-    if (el) {
-      const diff = Date.now() - activeB.currentSetStart;
-      el.textContent = `⏱️ ${fmtDuration(diff)}`;
-    }
+    if (el) el.textContent = `⏱️ ${fmtDuration(Date.now() - activeB.currentSetStart)}`;
   }
 
-  // 2. 更新全域背景狀態
-  if (activeB) document.body.classList.add("working-mode");
-  else document.body.classList.remove("working-mode");
+  // 2. 清理背景狀態與所有震動
+  document.body.classList.remove("working-mode", "rest-warning", "rest-danger");
+  
+  if (activeB) {
+    document.body.classList.add("working-mode");
+    document.querySelectorAll(".zookeeper-shake").forEach(el => el.classList.remove("zookeeper-shake"));
+  } else {
+    let maxRestDiff = 0;
+    let blockToShake = null;
 
-  // 3. 更新休息計時器
-  blocks.forEach(b => {
-    if (!b.ended && !b.isWorking) {
-        let refTime = b.lastSetEnd || (b.sets.length === 0 ? GLOBAL_LAST_END_TIME : null);
-        if (refTime) {
-            const el = document.getElementById(`header-timer-${b.id}`);
-            if (el) {
-                const diff = Date.now() - refTime;
-                el.textContent = `☕ ${fmtDuration(diff)}`;
-                el.className = "header-timer resting"; 
-            }
-        }
+    // 3. 更新休息計時器並找出最久的休息時間
+    blocks.forEach(b => {
+      if (!b.ended && !b.isWorking) {
+          // 休息計時
+          let refTime = b.lastSetEnd || (b.sets.length===0 ? getLatestEndTime() : null);
+          if (refTime) {
+              const diff = Date.now() - refTime;
+              if (diff > maxRestDiff) { maxRestDiff = diff; blockToShake = b.id; }
+              const el = document.getElementById(`header-timer-${b.id}`);
+              if (el) {
+                  el.textContent = `☕ ${fmtDuration(diff)}`;
+                  el.className = "header-timer resting"; 
+              }
+          }
+      }
+    });
+
+    // 4. 套用背景漸變與 Zookeeper 震動
+    const shakeTarget = document.getElementById(`block-${blockToShake}`);
+    document.querySelectorAll(".zookeeper-shake").forEach(el => {
+       if(!shakeTarget || el !== shakeTarget) el.classList.remove("zookeeper-shake");
+    });
+
+    if (maxRestDiff > 180000) { // 超過 3 分鐘 (紅色 + 震動)
+      document.body.classList.add("rest-danger");
+      if(shakeTarget && !shakeTarget.classList.contains("disabled")) shakeTarget.classList.add("zookeeper-shake");
+    } else if (maxRestDiff > 120000) { // 超過 2 分鐘 (黃色)
+      document.body.classList.add("rest-warning");
     }
-  });
+  }
 }, 500);
 
 // ===== 轉盤工具 =====
@@ -198,15 +248,39 @@ function buildWheel(elem, values, initialValue, onChange){
   }, 0);
 }
 
-// ====== API ======
-const API_BASE = "https://script.google.com/macros/s/AKfycbwy1VKGICqMwjax01HpCvYChWOuJW0H448qP9bSzJ--v9yYD8wbYrCR9aT5vYkjLBlYow/exec";
+// ====== API (Firebase Firestore 版) ======
+import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
+import { getFirestore, collection, getDocs, addDoc, doc, setDoc, getDoc, writeBatch } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
 
+// 你的 Firebase 設定檔
+const firebaseConfig = {
+  apiKey: "AIzaSyAiXGMdhpmp_CDqTTGkS869eZeR5-FPt20",
+  authDomain: "nescient-fitness.firebaseapp.com",
+  projectId: "nescient-fitness",
+  storageBucket: "nescient-fitness.firebasestorage.app",
+  messagingSenderId: "1025865199598",
+  appId: "1:1025865199598:web:132e0343749264b8de28ff",
+  measurementId: "G-526FZJ49JL"
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+
+// 讀取資料
 async function apiLoadRows(){
-  const r = await fetch(API_BASE);
-  const j = await r.json();
-  if (!j.ok) throw new Error(j.error || "load failed");
-  if (j.catalog && Object.keys(j.catalog).length > 0) CATALOG = j.catalog;
-  const rows = j.rows || [];
+  // 1. 讀取動作庫 (Catalog)
+  try {
+    const catSnap = await getDoc(doc(db, "config", "catalog"));
+    if(catSnap.exists()) CATALOG = catSnap.data();
+  } catch(e) { console.log("Catalog尚未建立", e); }
+
+  // 2. 讀取歷史紀錄
+  const querySnapshot = await getDocs(collection(db, "records"));
+  const rows = [];
+  querySnapshot.forEach((document) => {
+    rows.push(document.data());
+  });
+
   return rows.map(row => {
     const d = new Date(row["日期"]);
     const logicalDate = new Date(d);
@@ -216,11 +290,14 @@ async function apiLoadRows(){
   });
 }
 
+// 寫入新紀錄
 async function apiAppendRows(rows){
-  const r = await fetch(API_BASE, { method: "POST", body: JSON.stringify({ rows: rows }) });
-  const j = await r.json();
-  if (!j.ok) throw new Error(j.error || "append failed");
-  return j.appended || 0;
+  let count = 0;
+  for(let r of rows) {
+    await addDoc(collection(db, "records"), r);
+    count++;
+  }
+  return count;
 }
 
 async function reloadFromBackend(){
@@ -273,6 +350,7 @@ function renderMain(){
 function renderBlock(b){
   const blockCls = "block" + (b.ended ? " disabled" : "") + (b.isWorking ? " active-block" : "");
   const wrap = el("section", blockCls);
+  wrap.id = "block-" + b.id;
   
   // Left
   const leftCol = el("div", "block-left-col");
@@ -294,13 +372,12 @@ function renderBlock(b){
   } else {
     const delBlockBtn = el("button", "del-btn", "✕");
     delBlockBtn.onclick = () => {
-      if(confirm("確定要刪除這個動作紀錄嗎？")){
+      showConfirm("刪除動作", "確定要刪除這個動作紀錄嗎？", () => {
         const idx = blocks.indexOf(b);
         if(idx > -1) blocks.splice(idx, 1);
-        if(blocks.length === 0) { currentActionIdx = null; GLOBAL_LAST_END_TIME = null; SESSION_START_TIME = null; }
-        renderMain();
-        renderActionNav();
-      }
+        if(blocks.length === 0) SESSION_START_TIME = null;
+        renderMain(); renderActionNav();
+      });
     };
     headRight.append(delBlockBtn);
   }
@@ -372,7 +449,7 @@ function renderBlock(b){
             const lb = kgToNearestLbStep(kg);
             
             // 休息計時
-            let refTime = b.lastSetEnd || (b.sets.length===0 ? GLOBAL_LAST_END_TIME : null);
+            let refTime = b.lastSetEnd || (b.sets.length===0 ? getLatestEndTime() : null);
             if(refTime) {
                  const diff = Date.now() - refTime;
                  timerDiv.textContent = `☕ ${fmtDuration(diff)}`;
@@ -488,13 +565,16 @@ function renderBlock(b){
       const delBtn = el("button", "del-btn", "✕");
       delBtn.addEventListener("click", (e)=>{
         e.stopPropagation();
-        if(bRef.isWorking) { alert("請先完成目前這一組"); return; }
-        if(confirm(`確定刪除第 ${idx+1} 組嗎？`)){
+        // ★ alert 換成 showToast
+        if(bRef.isWorking) { showToast("請先完成目前這一組"); return; }
+        
+        // ★ confirm 換成 showConfirm
+        showConfirm("刪除組數", `確定刪除第 ${idx+1} 組嗎？`, () => {
           bRef.sets.splice(idx, 1); bRef.activeSetIdx = null;
           // 刪除後把最新一組的數據帶入 temp，方便繼續做
           if(bRef.sets.length > 0) bRef.temp = { ...bRef.sets[bRef.sets.length-1] };
           rebuildWheels(); updateSummary(); renderSetListInner(container, bRef); refreshButtons();
-        }
+        });
       });
       li.append(infoDiv, delBtn);
       container.append(li);
@@ -536,9 +616,8 @@ function renderBlock(b){
     if (!b.isWorking) {
         // === START ===
         b.isWorking = true; b.currentSetStart = now; 
-        let lastEnd = GLOBAL_LAST_END_TIME; 
-        if(!lastEnd && b.sets.length===0) lastEnd = GLOBAL_LAST_END_TIME; 
         
+        let lastEnd = getLatestEndTime(); 
         let rest = 0; if(lastEnd) rest = now - lastEnd; 
         b.tempRestTime = rest;
 
@@ -551,14 +630,13 @@ function renderBlock(b){
         // === FINISH ===
         b.isWorking = false;
         let work = 0; if(b.currentSetStart) work = now - b.currentSetStart;
-        GLOBAL_LAST_END_TIME = now;
         
         timerDiv.textContent = `☕ 0:00`;
         timerDiv.className = "header-timer resting";
 
-        // 寫入新紀錄
-        const src = b.temp; // 這裡一定讀 temp，因為 activeSetIdx 為 null
-        b.sets.push({ reps: src.reps, weight: src.weight, restTime: b.tempRestTime, workTime: work });
+        // 寫入新紀錄 (加入 endTime)
+        const src = b.temp; 
+        b.sets.push({ reps: src.reps, weight: src.weight, restTime: b.tempRestTime, workTime: work, endTime: now });
         
         // 繼承給下一組
         b.temp = { reps: src.reps, weight: src.weight }; 
@@ -571,11 +649,12 @@ function renderBlock(b){
 
   endBtn.addEventListener("click", ()=>{
     if (b.ended) return;
-    if (confirm("確定結束此動作？")){
+    // ★ 換成深色 Modal
+    showConfirm("結束動作", "確定結束此動作？", () => {
         b.ended = true; wrap.classList.add("disabled");
         updateSummary(); refreshButtons();
         currentActionIdx = null; renderActionNav(); renderMain();
-    }
+    });
   });
   wrap.append(leftCol, rightCol);
   return wrap;
@@ -588,7 +667,18 @@ function renderBottomNav(){
     btn.appendChild(el("span", "", v.label));
     btn.addEventListener("click",()=>{
       const activeB = getActiveBlock();
-      if (activeB && !activeB.ended) { alert("請先完成或刪除目前的動作，才能切換部位！"); return; }
+      if (activeB && !activeB.ended) { 
+        // ★ 換成 Toast 提示與錯誤晃動
+        showToast("請先完成目前的動作，才能切換部位！"); 
+        const activeEl = document.getElementById(`block-${activeB.id}`);
+        if(activeEl) {
+          activeEl.scrollIntoView({behavior: "smooth", block: "start"});
+          activeEl.classList.remove("error-shake");
+          void activeEl.offsetWidth; // 強制重繪
+          activeEl.classList.add("error-shake");
+        }
+        return; 
+      }
       currentPart = k; currentActionIdx = null; 
       renderBottomNav(); renderActionNav(); 
     });
@@ -607,13 +697,19 @@ function renderActionNav(){
     const chip = el("div","action-chip"+(isActive?" active":""), name);
     chip.addEventListener("click",()=>{
       const currentActive = getActiveBlock();
+      // 在 renderActionNav 的 chip click 裡：
       if (currentActive && !currentActive.ended) {
         if (currentActive.part === currentPart && currentActive.actionIdx === i) return;
-        alert("請先完成或刪除目前的動作，才能選擇下一個動作！"); 
         
-        // ★ 如果有未完成的動作，試圖切換時自動捲動回去提醒使用者
-        const activeEl = document.querySelector(".active-block");
-        if(activeEl) activeEl.scrollIntoView({behavior: "smooth", block: "start"});
+        showToast("請先完成目前的動作！"); 
+        const activeEl = document.getElementById(`block-${currentActive.id}`);
+        if(activeEl) {
+          activeEl.scrollIntoView({behavior: "smooth", block: "start"});
+          // 觸發 Error Shake 動畫
+          activeEl.classList.remove("error-shake");
+          void activeEl.offsetWidth; // 強制重繪
+          activeEl.classList.add("error-shake");
+        }
         return;
       }
       
@@ -678,37 +774,50 @@ function renderExportPreview(rows){
     container.appendChild(div);
   });
 }
-function resetMainFromCsv(){
-  if(!confirm("確定要清除所有目前的訓練卡片嗎？")) return;
-  blocks.length = 0; idCounter = 1; currentPart = null; currentActionIdx = null; GLOBAL_LAST_END_TIME = null; SESSION_START_TIME = null;
+
+// 獨立出來的清空邏輯 (不帶確認視窗，供同步成功後直接呼叫)
+function clearBoardData(){
+  blocks.length = 0; idCounter = 1; currentPart = null; currentActionIdx = null; SESSION_START_TIME = null;
   renderBottomNav(); renderActionNav(); renderMain();
+}
+
+function resetMainFromCsv(){
+  // 改用自訂的深色確認視窗
+  showConfirm("清除全部", "確定要清除所有目前的訓練卡片嗎？", () => {
+    clearBoardData();
+  });
 }
 
 finishDayBtn?.addEventListener("click", ()=>{
   const rows = collectTodayRows();
-  if (!rows.length){ alert("尚未有任何組數紀錄。"); return; }
+  if (!rows.length){ showToast("尚未有任何組數紀錄。"); return; }
   document.getElementById("exportTitle").textContent = "本次運動總結";
   renderExportPreview(rows);
   exportPanel.classList.remove("hidden");
 });
+
 closeExportBtn?.addEventListener("click", ()=> exportPanel.classList.add("hidden"));
+
 confirmAppendBtn?.addEventListener("click", async ()=>{
   confirmAppendBtn.disabled = true; confirmAppendBtn.textContent = "同步中...";
   try{
     const rows = collectTodayRows();
-    if (!rows.length){ alert("尚未有任何組數紀錄。"); confirmAppendBtn.disabled=false; return; }
+    if (!rows.length){ showToast("尚未有任何組數紀錄。"); confirmAppendBtn.disabled=false; return; }
     const appended = await apiAppendRows(rows); 
     await reloadFromBackend(); 
-    exportPanel.classList.add("hidden"); resetMainFromCsv();
+    exportPanel.classList.add("hidden"); 
+    clearBoardData(); // 同步成功後安靜清空，不彈 confirm
+    
     tabs.forEach(t => t.classList.remove("active"));
     document.querySelector('.tab-btn[data-tab="records"]')?.classList.add("active");
     Object.values(pages).forEach(p => p.classList.remove("show"));
     pages.records.classList.add("show");
     renderRecordsTable(); 
-    alert(`同步成功！已儲存 ${appended} 筆紀錄。`);
-  }catch(e){ console.error(e); alert("同步發生異常\n" + e.message); } 
-  finally { confirmAppendBtn.disabled = false; confirmAppendBtn.textContent = "完成"; }
+    showToast(`🎉 同步成功！已儲存 ${appended} 筆紀錄。`);
+  }catch(e){ console.error(e); showToast("同步發生異常：" + e.message); } 
+  finally { confirmAppendBtn.disabled = false; confirmAppendBtn.textContent = "確認提交"; }
 });
+
 clearAll?.addEventListener("click", resetMainFromCsv);
 
 // ====== Records Filter & Table ======
@@ -967,10 +1076,11 @@ function renderEditor(){
 saveCatalogBtn?.addEventListener("click", async () => {
   saveCatalogBtn.disabled = true; saveCatalogBtn.textContent = "儲存中...";
   try {
-    const r = await fetch(API_BASE, { method: "POST", body: JSON.stringify({ type: "config", catalog: CATALOG }), });
-    const j = await r.json();
-    if(j.ok) { alert("設定已儲存！"); renderBottomNav(); renderActionNav(); } else { alert("儲存失敗：" + j.error); }
-  } catch(e) { alert("連線錯誤"); console.error(e); }
+    // 寫入 Firestore 的 config/catalog
+    await setDoc(doc(db, "config", "catalog"), CATALOG);
+    alert("設定已儲存！"); 
+    renderBottomNav(); renderActionNav(); 
+  } catch(e) { alert("儲存失敗：" + e.message); console.error(e); }
   saveCatalogBtn.disabled = false; saveCatalogBtn.textContent = "儲存變更到雲端";
 });
 
@@ -1008,7 +1118,7 @@ tabs.forEach(btn=>{
 (async function init(){
   try { await reloadFromBackend(); } catch(e){ console.warn("後端連線中...", e); }
   renderCalendarWeekdays();
-  blocks.length = 0; idCounter = 1; currentPart = null; currentActionIdx = null; GLOBAL_LAST_END_TIME = null; SESSION_START_TIME = null;
+  blocks.length = 0; idCounter = 1; currentPart = null; currentActionIdx = null; SESSION_START_TIME = null;
   if(importedRows.length > 0) renderRecordsFilters(importedRows); 
   renderRecordsTable();
   renderBottomNav(); renderActionNav(); renderMain();

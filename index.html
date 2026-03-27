@@ -8,7 +8,6 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
-  <div id="bg-gradient"></div>
 
   <div class="top-tabs sticky-tabs">
     <button class="tab-btn active" data-tab="main">主頁</button>
@@ -110,7 +109,19 @@
     </div>
   </div>
 
+  <div id="toast" class="toast"></div>
+  <div id="customModal" class="custom-modal hidden">
+    <div class="modal-content">
+      <h3 id="modalTitle">提示</h3>
+      <p id="modalBody">內容</p>
+      <div class="modal-actions">
+        <button id="modalBtnCancel" class="btn">取消</button>
+        <button id="modalBtnConfirm" class="btn btn-primary" style="background: var(--accent-danger);">確定</button>
+      </div>
+    </div>
+  </div>
+
   <noscript>此原型需要 JavaScript 才能運作。</noscript>
-  <script src="app.js"></script>
+  <script type="module" src="app.js"></script>
 </body>
 </html>

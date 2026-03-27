@@ -1,37 +1,96 @@
 /* ====== styles.css (v2.4 手機版終極修正) ====== */
 
-/* === 1. 基礎變數 === */
+/* === 1. 基礎變數 (Graphite & Violet 深色沉浸主題) === */
 :root {
-  --bg-glass: rgba(30, 30, 40, 0.85);
-  --bg-glass-active: rgba(10, 35, 20, 0.9);
-  --border-glass: rgba(255, 255, 255, 0.12);
-  --text-main: #ffffff;
-  --text-muted: #9ca3af;
-  --accent: #a855f7;
-  --accent-work: #22c55e;
-  --accent-rest: #fbbf24;
+  --bg-base: #11111b;       /* 深石墨底色 */
+  --bg-surface: #1e1e2e;    /* 卡片表面色 */
+  --bg-glass: rgba(30, 30, 46, 0.85);
+  --bg-glass-active: rgba(49, 50, 68, 0.9);
+  --border-glass: rgba(255, 255, 255, 0.08);
+  --text-main: #cdd6f4;     /* 主文字 */
+  --text-muted: #a6adc8;    /* 次要文字 */
+  
+  --accent: #cba6f7;        /* 羅蘭紫 (主色) */
+  --accent-work: #a6e3a1;   /* 翡翠綠 (運動中) */
+  --accent-rest: #f9e2af;   /* 琥珀黃 (休息警告) */
+  --accent-danger: #f38ba8; /* 玫瑰紅 (超時/刪除) */
+  
   --radius: 16px;
   --btn-radius: 12px;
 }
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; outline: none; }
-body { margin: 0; font-family: "PingFang TC", sans-serif; color: var(--text-main); background-color: #0f0f13; padding-bottom: 120px; transition: background 0.5s ease; }
 
-/* === 背景動畫 === */
-#bg-gradient { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: -1; }
-#bg-gradient::after {
-  content: ""; position: absolute; top:0; left:0; width:100%; height:100%;
-  background: linear-gradient(-45deg, #0f0c29, #302b63, #24243e, #141e30);
-  background-size: 400% 400%; animation: gradientBG 15s ease infinite; z-index: 1;
+/* === 2. 全域背景漸變邏輯 === */
+body { 
+  margin: 0; 
+  font-family: "PingFang TC", sans-serif; 
+  color: var(--text-main); 
+  background-color: var(--bg-base); 
+  padding-bottom: 120px; 
+  transition: background-color 1.5s ease; /* ★ 讓背景色變化極度平滑 */
 }
-#bg-gradient::before {
-  content: ""; position: absolute; top:0; left:0; width:100%; height:100%;
-  background: linear-gradient(-45deg, #051a0e, #0f381e, #14522d, #0b2916);
-  background-size: 400% 400%; animation: gradientBG 15s ease infinite;
-  z-index: 2; opacity: 0; transition: opacity 0.8s ease-in-out;
+
+/* 狀態背景色 (微透質感) */
+body.working-mode { background-color: #16241e; } /* 翡翠綠微光 */
+body.rest-warning { background-color: #292215; } /* 琥珀黃微光 */
+body.rest-danger  { background-color: #2b171c; } /* 玫瑰紅危險光 */
+
+/* === 3. 震動與錯誤動畫 === */
+/* 輕微錯誤晃動 (Error Shake) */
+@keyframes error-shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-6px); }
+  40% { transform: translateX(6px); }
+  60% { transform: translateX(-3px); }
+  80% { transform: translateX(3px); }
 }
-body.working-mode #bg-gradient::before { opacity: 1; }
-@keyframes gradientBG { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
+.error-shake { 
+  animation: error-shake 0.4s ease-in-out; 
+  border-color: var(--accent-danger) !important; 
+}
+
+/* Zookeeper 節奏震動 (晃兩下 -> 停頓 -> 晃兩下) */
+@keyframes zookeeper-shake {
+  0%, 100% { transform: translateX(0); }
+  2%, 6% { transform: translateX(-5px) rotate(-1deg); }
+  4%, 8% { transform: translateX(5px) rotate(1deg); }
+  10% { transform: translateX(0); }
+  /* 10% ~ 100% 是長達 2 秒的安靜停頓期，不會讓人眼花 */
+}
+.zookeeper-shake { 
+  animation: zookeeper-shake 2.5s infinite; 
+  border-color: var(--accent-danger) !important; 
+  box-shadow: 0 0 20px rgba(243, 139, 168, 0.3) !important; 
+}
+
+/* === 4. Toast 與 Modal UI === */
+.toast {
+  position: fixed; top: -50px; left: 50%; transform: translateX(-50%);
+  background: var(--bg-surface); color: var(--text-main);
+  padding: 12px 24px; border-radius: 30px; border: 1px solid var(--border-glass);
+  box-shadow: 0 10px 30px rgba(0,0,0,0.5); font-size: 0.95rem; font-weight: bold;
+  z-index: 9999; transition: top 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+.toast.show { top: 40px; }
+
+.custom-modal {
+  position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+  background: rgba(0,0,0,0.6); backdrop-filter: blur(5px);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 10000; transition: opacity 0.2s;
+}
+.custom-modal.hidden { opacity: 0; pointer-events: none; }
+.modal-content {
+  background: var(--bg-surface); width: 90%; max-width: 360px;
+  border-radius: var(--radius); padding: 25px; border: 1px solid var(--border-glass);
+  box-shadow: 0 20px 40px rgba(0,0,0,0.5); transform: scale(1); transition: transform 0.2s;
+}
+.custom-modal.hidden .modal-content { transform: scale(0.95); }
+.modal-content h3 { margin: 0 0 10px 0; color: #fff; font-size: 1.3rem; }
+.modal-content p { margin: 0 0 25px 0; color: var(--text-muted); font-size: 0.95rem; line-height: 1.5; }
+.modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
+.modal-actions .btn { padding: 10px 20px; font-size: 0.95rem; }
 
 /* === 頁面容器 === */
 .page { display: none; padding: 15px; max-width: 1000px; margin: 0 auto; width: 100%; animation: fadeIn 0.3s ease; }
@@ -361,4 +420,18 @@ body.working-mode #bg-gradient::before { opacity: 1; }
   .set-time {
     font-size: 0.6rem;
   }
+}
+
+/* ====== 修正按鈕與標籤對比度 (加深背景與白字銳化) ====== */
+.btn-primary, .finish-btn, #toggleUnitFloatBtn, .tag {
+  background: linear-gradient(135deg, #7c3aed, #4c1d95) !important; /* 深紫羅蘭漸層 */
+  color: #ffffff !important;
+  font-weight: bold;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.8) !important; /* 文字加陰影，邊緣更清晰 */
+  border: 1px solid rgba(167, 139, 250, 0.4) !important; /* 微亮邊框增加立體感 */
+}
+
+/* 按鈕按下去或 hover 時稍微變亮一點 (標籤不需要 hover 所以不加) */
+.btn-primary:active, .finish-btn:active, #toggleUnitFloatBtn:active {
+  background: linear-gradient(135deg, #8b5cf6, #5b21b6) !important;
 }
