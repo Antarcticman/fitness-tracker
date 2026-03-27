@@ -1043,8 +1043,16 @@ function renderEditor(){
   Object.entries(CATALOG).forEach(([key, val]) => {
     const box = el("div", "edit-group");
     const head = el("div", "eg-head"); head.innerHTML = `<strong>${val.label}</strong> <span style="font-size:0.8em;opacity:0.6">(${key})</span>`;
+    
     const delPartBtn = el("button", "btn btn-danger btn-sm", "刪除部位");
-    delPartBtn.onclick = () => { if(confirm(`確定刪除「${val.label}」及其所有動作？`)) { delete CATALOG[key]; renderEditor(); } };
+    // ★ 把 confirm 換成 showConfirm
+    delPartBtn.onclick = () => { 
+      showConfirm("刪除部位", `確定刪除「${val.label}」及其所有動作？`, () => {
+        delete CATALOG[key]; 
+        renderEditor();
+      });
+    };
+    
     head.appendChild(delPartBtn); box.appendChild(head);
     const ul = el("ul", "eg-list");
     val.exercises.forEach((ex, idx) => {
@@ -1054,6 +1062,7 @@ function renderEditor(){
       li.appendChild(delExBtn); ul.appendChild(li);
     });
     box.appendChild(ul);
+    
     const addRow = el("div", "eg-add-row");
     const input = el("input", "eg-input"); input.placeholder = "輸入新動作...";
     const addBtn = el("button", "btn btn-primary btn-sm", "新增");
@@ -1062,25 +1071,40 @@ function renderEditor(){
     addRow.append(input, addBtn); box.appendChild(addRow);
     editorContainer.appendChild(box);
   });
+  
   const newPartBox = el("div", "edit-group new-part-box"); newPartBox.innerHTML = `<div class="eg-head"><strong>＋ 新增一個部位類別</strong></div>`;
   const npRow = el("div", "eg-add-row");
   const keyInput = el("input", "eg-input"); keyInput.placeholder = "ID (英文,如 legs)";
   const labelInput = el("input", "eg-input"); labelInput.placeholder = "顯示名稱 (如 臀腿)";
   const npBtn = el("button", "btn btn-primary btn-sm", "新增");
+  
   npBtn.onclick = () => {
     const k = keyInput.value.trim(); const l = labelInput.value.trim();
-    if(k && l){ if(CATALOG[k]) { alert("ID 已存在"); return; } CATALOG[k] = { label: l, exercises: [] }; renderEditor(); } else { alert("請輸入完整"); }
+    if(k && l){ 
+      // ★ 把 alert 換成 showToast
+      if(CATALOG[k]) { showToast("ID 已存在"); return; } 
+      CATALOG[k] = { label: l, exercises: [] }; 
+      renderEditor(); 
+    } else { 
+      showToast("請輸入完整"); 
+    }
   };
+  
   npRow.append(keyInput, labelInput, npBtn); newPartBox.appendChild(npRow); editorContainer.appendChild(newPartBox);
 }
+
 saveCatalogBtn?.addEventListener("click", async () => {
   saveCatalogBtn.disabled = true; saveCatalogBtn.textContent = "儲存中...";
   try {
     // 寫入 Firestore 的 config/catalog
     await setDoc(doc(db, "config", "catalog"), CATALOG);
-    alert("設定已儲存！"); 
+    // ★ 把 alert 換成 showToast
+    showToast("設定已儲存！"); 
     renderBottomNav(); renderActionNav(); 
-  } catch(e) { alert("儲存失敗：" + e.message); console.error(e); }
+  } catch(e) { 
+    showToast("儲存失敗：" + e.message); 
+    console.error(e); 
+  }
   saveCatalogBtn.disabled = false; saveCatalogBtn.textContent = "儲存變更到雲端";
 });
 
