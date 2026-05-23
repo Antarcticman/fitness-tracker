@@ -762,7 +762,8 @@ function renderExportPreview(rows){
   if(!container) return; container.innerHTML = ""; container.className = "export-preview";
   let totalTimeHtml = "";
   if(SESSION_START_TIME) {
-     const duration = Date.now() - SESSION_START_TIME;
+     const lastEndTime = getLatestEndTime() || Date.now();
+     const duration = lastEndTime - SESSION_START_TIME;
      totalTimeHtml = `<div style="text-align:center; padding:10px; color:var(--accent-work); font-weight:bold; border-bottom:1px solid #333;">
        ⏱ 今日訓練總時長：${fmtHours(duration)}
      </div>`;

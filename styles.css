@@ -66,7 +66,7 @@ body.rest-danger  { background-color: #2b171c; } /* 玫瑰紅危險光 */
 
 /* === 4. Toast 與 Modal UI === */
 .toast {
-  position: fixed; top: -50px; left: 50%; transform: translateX(-50%);
+  position: fixed; top: -150px; left: 50%; transform: translateX(-50%);
   background: var(--bg-surface); color: var(--text-main);
   padding: 12px 24px; border-radius: 30px; border: 1px solid var(--border-glass);
   box-shadow: 0 10px 30px rgba(0,0,0,0.5); font-size: 0.95rem; font-weight: bold;
