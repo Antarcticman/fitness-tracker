@@ -251,6 +251,7 @@ function buildWheel(elem, values, initialValue, onChange){
 // ====== API (Firebase Firestore 版) ======
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
 import { getFirestore, collection, getDocs, addDoc, doc, setDoc, getDoc, writeBatch } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
+import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
 
 // 你的 Firebase 設定檔
 const firebaseConfig = {
@@ -265,6 +266,7 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
+const auth = getAuth(app);
 
 // 讀取資料
 async function apiLoadRows(){
@@ -1138,12 +1140,52 @@ tabs.forEach(btn=>{
   });
 });
 
-// ====== Init ======
-(async function init(){
-  try { await reloadFromBackend(); } catch(e){ console.warn("後端連線中...", e); }
-  renderCalendarWeekdays();
-  blocks.length = 0; idCounter = 1; currentPart = null; currentActionIdx = null; SESSION_START_TIME = null;
-  if(importedRows.length > 0) renderRecordsFilters(importedRows); 
-  renderRecordsTable();
-  renderBottomNav(); renderActionNav(); renderMain();
-})();
+// ====== Auth Logic & Init ======
+const loginModal = document.getElementById("loginModal");
+const loginBtn = document.getElementById("loginBtn");
+const logoutBtn = document.getElementById("logoutBtn");
+const loginEmail = document.getElementById("loginEmail");
+const loginPassword = document.getElementById("loginPassword");
+
+loginBtn?.addEventListener("click", async () => {
+  const e = loginEmail.value.trim();
+  const p = loginPassword.value.trim();
+  if(!e || !p) { showToast("請輸入信箱與密碼"); return; }
+  loginBtn.disabled = true; loginBtn.textContent = "登入中...";
+  try {
+    await signInWithEmailAndPassword(auth, e, p);
+  } catch(err) {
+    showToast("登入失敗：" + err.message);
+    loginBtn.disabled = false; loginBtn.textContent = "登入";
+  }
+});
+
+logoutBtn?.addEventListener("click", () => {
+  showConfirm("登出", "確定要登出系統嗎？", () => {
+    signOut(auth).then(() => {
+      importedRows = [];
+      clearBoardData();
+    });
+  });
+});
+
+let isAppInitialized = false;
+
+onAuthStateChanged(auth, async (user) => {
+  if (user) {
+    loginModal.classList.add("hidden");
+    if(!isAppInitialized) {
+      isAppInitialized = true;
+      try { await reloadFromBackend(); } catch(e){ console.warn("後端連線中...", e); }
+      renderCalendarWeekdays();
+      blocks.length = 0; idCounter = 1; currentPart = null; currentActionIdx = null; SESSION_START_TIME = null;
+      if(importedRows.length > 0) renderRecordsFilters(importedRows); 
+      renderRecordsTable();
+      renderBottomNav(); renderActionNav(); renderMain();
+    }
+  } else {
+    loginModal.classList.remove("hidden");
+    isAppInitialized = false;
+    if (loginBtn) { loginBtn.disabled = false; loginBtn.textContent = "登入"; }
+  }
+});

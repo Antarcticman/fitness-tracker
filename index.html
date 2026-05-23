@@ -89,7 +89,8 @@
       </div>
       <div class="text" style="margin-bottom: 25px;">在此新增或刪除部位與動作，變更後請記得按儲存。</div>
       <div id="editor-container" class="editor-wrap"></div>
-      <div class="actions" style="margin-top: 20px; justify-content: flex-end;">
+      <div class="actions" style="margin-top: 20px; justify-content: space-between;">
+        <button id="logoutBtn" class="btn btn-danger">登出系統</button>
         <button id="saveCatalogBtn" class="btn btn-primary">儲存變更到雲端</button>
       </div>
     </div>
@@ -117,6 +118,17 @@
       <div class="modal-actions">
         <button id="modalBtnCancel" class="btn">取消</button>
         <button id="modalBtnConfirm" class="btn btn-primary" style="background: var(--accent-danger);">確定</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="loginModal" class="custom-modal">
+    <div class="modal-content" style="max-width: 320px;">
+      <h3 style="text-align: center; margin-bottom: 20px; color: var(--accent);">身份驗證</h3>
+      <input type="email" id="loginEmail" class="eg-input" placeholder="電子郵件" style="width: 100%; margin-bottom: 15px; box-sizing: border-box;" />
+      <input type="password" id="loginPassword" class="eg-input" placeholder="密碼" style="width: 100%; margin-bottom: 20px; box-sizing: border-box;" />
+      <div class="modal-actions" style="justify-content: center;">
+        <button id="loginBtn" class="btn btn-primary" style="width: 100%;">登入</button>
       </div>
     </div>
   </div>
